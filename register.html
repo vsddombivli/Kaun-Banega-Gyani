@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VSD Quiz — Team Registration</title>
+<link rel="stylesheet" href="shared/theme.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // jsdelivr is primary; if it's blocked/unreachable, synchronously fall
+  // back to unpkg before the parser continues to the next script tag.
+  if (typeof supabase === 'undefined') {
+    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+  }
+</script>
+<style>
+  .wrap{max-width:560px;margin:0 auto;padding:32px 20px 60px;}
+  .field{margin-bottom:14px;}
+  label{font-size:12px;color:var(--ink-dim);display:block;margin-bottom:5px;}
+  .names-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;}
+  .team-pick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+  .team-pick .opt{padding:10px 16px;border-radius:10px;border:1px solid var(--line);cursor:pointer;font-weight:700;}
+  .team-pick .opt.taken{opacity:.25;cursor:not-allowed;text-decoration:line-through;}
+  .team-pick .opt.selected{border-color:var(--gold-bright);box-shadow:0 0 16px rgba(246,216,136,.4);background:rgba(232,189,92,.15);}
+  .success-box{text-align:center;padding:40px 24px;}
+  .code-big{font-family:'Cinzel',serif;font-size:34px;letter-spacing:.2em;color:var(--gold-bright);margin:14px 0;}
+  .logo-wrap{text-align:center;margin-bottom:18px;}
+  .logo-wrap img{max-width:220px;width:60%;}
+  .member-row{display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:8px;}
+  .closed-box{text-align:center;padding:50px 24px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel fade-in" style="padding:26px;" id="card">
+    <div class="logo-wrap"><img src="shared/logo.png" alt="Kaun Banega Gyani"></div>
+    <div class="eyebrow">VSD Prabhu Pooja &amp; Guru Vandan</div>
+    <h1 style="margin-bottom:6px;" id="regHeader">Team Registration</h1>
+    <p style="color:var(--ink-dim);font-size:14px;margin-bottom:20px;" id="regDescription">Loading…</p>
+
+    <div id="formBody">
+      <div class="field"><label>Select Team Name</label>
+        <div class="team-pick" id="teamPick"></div>
+      </div>
+      <div class="field"><label>Captain Name</label><input id="captain"></div>
+      <div class="field"><label>Captain Age</label><input id="captainAge" type="number" min="1" max="99"></div>
+      <div class="field"><label>Mobile Number</label><input id="phone" type="tel"></div>
+      <div class="field"><label>Pathshala Name</label><input id="pathshala"></div>
+      <div class="field"><label>Members other than captain (min 4, max 6) — team size is 5–7 including captain. Age required if name is filled</label>
+        <div id="membersGrid"></div>
+        <button class="btn btn-outline" type="button" onclick="addMemberField()" style="margin-top:6px;">+ Add Member</button>
+      </div>
+      <button class="btn btn-gold btn-lg" style="width:100%;margin-top:10px;" onclick="submitRegistration()">SUBMIT REGISTRATION</button>
+      <div id="regError" style="color:var(--red);margin-top:10px;font-size:14px;"></div>
+    </div>
+  </div>
+</div>
+
+<script src="shared/supabase-client.js"></script>
+<script>
+let event = null, selectedTeamName = null, memberCount = 0;
+const MAX_MEMBERS = 6;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  event = await getActiveEvent();
+  document.getElementById('regHeader').textContent = event.reg_header || 'Team Registration';
+  document.getElementById('regDescription').textContent = event.reg_description || '';
+
+  const { data: status } = await sb.rpc('get_registration_status', { p_event_id: event.id });
+  const s = status && status[0];
+  if (!s || !s.is_open) {
+    document.getElementById('formBody').innerHTML = `<div class="closed-box"><div class="chakra" style="margin:0 auto 16px;opacity:.3;"></div>
+      <h2>${s ? s.reason : 'Registration is not available right now.'}</h2></div>`;
+    return;
+  }
+
+  await loadTeamNames();
+  for (let i=0;i<4;i++) addMemberField();
+});
+
+async function loadTeamNames() {
+  const { data } = await sb.from('quiz_team_names').select('*').eq('event_id', event.id).order('team_name');
+  document.getElementById('teamPick').innerHTML = (data||[]).map(t =>
+    `<div class="opt ${t.taken?'taken':''}" ${t.taken?'':`onclick="pickTeam('${t.team_name}')"`} id="opt-${t.team_name}">${t.team_name}</div>`).join('');
+}
+function pickTeam(name) {
+  selectedTeamName = name;
+  document.querySelectorAll('.team-pick .opt').forEach(el => el.classList.remove('selected'));
+  document.getElementById('opt-' + name).classList.add('selected');
+}
+function addMemberField() {
+  if (memberCount >= MAX_MEMBERS) return toast('Maximum ' + MAX_MEMBERS + ' members');
+  memberCount++;
+  const grid = document.getElementById('membersGrid');
+  const row = document.createElement('div');
+  row.className = 'member-row';
+  row.innerHTML = `<input class="member-name-input" placeholder="Member ${memberCount} full name">
+    <input class="member-age-input" type="number" min="1" max="99" placeholder="Age">`;
+  grid.appendChild(row);
+}
+
+async function submitRegistration() {
+  const err = document.getElementById('regError');
+  err.textContent = '';
+  if (!selectedTeamName) return err.textContent = 'Please select a team name.';
+  const captain = document.getElementById('captain').value.trim();
+  const captainAge = document.getElementById('captainAge').value;
+  const phone = document.getElementById('phone').value.trim();
+  const pathshala = document.getElementById('pathshala').value.trim();
+
+  const names = [...document.querySelectorAll('.member-name-input')].map(i => i.value.trim());
+  const ages = [...document.querySelectorAll('.member-age-input')].map(i => i.value);
+  const members = names.map((n, i) => ({ name: n, age: ages[i] ? +ages[i] : null })).filter(m => m.name);
+
+  if (!captain || !captainAge || !phone) return err.textContent = 'Captain name, captain age, and mobile number are required.';
+  if (members.length < 4) return err.textContent = 'Please enter at least 4 members (5 total including captain).';
+  if (members.some(m => !m.age)) return err.textContent = 'Age is required for every member you named.';
+
+  const { data, error } = await sb.rpc('register_team', {
+    p_event_id: event.id, p_team_name: selectedTeamName, p_captain_name: captain,
+    p_captain_age: +captainAge, p_phone: phone, p_pathshala: pathshala, p_members: members
+  });
+  if (error) { err.textContent = error.message; await loadTeamNames(); return; }
+
+  const { data: team } = await sb.from('quiz_teams').select('team_code').eq('id', data).single();
+  document.getElementById('card').innerHTML = `
+    <div class="success-box">
+      <div class="eyebrow">Registration Complete</div>
+      <h1>Welcome, Team ${selectedTeamName}!</h1>
+      <p style="color:var(--ink-dim);">Give this code to your team device on quiz day</p>
+      <div class="code-big">${team.team_code}</div>
+    </div>`;
+}
+</script>
+</body>
+</html>

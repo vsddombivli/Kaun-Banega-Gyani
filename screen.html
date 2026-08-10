@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VSD Quiz — Presentation</title>
+<link rel="stylesheet" href="shared/theme.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // jsdelivr is primary; if it's blocked/unreachable, synchronously fall
+  // back to unpkg before the parser continues to the next script tag.
+  if (typeof supabase === 'undefined') {
+    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+  }
+</script>
+<style>
+  body{overflow:hidden;}
+  .stage{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;position:relative;}
+  .logo-badge{position:absolute;top:28px;left:50%;transform:translateX(-50%);text-align:center;}
+  .logo-badge .title{font-family:'Cinzel Decorative',serif;font-size:26px;color:var(--gold-bright);text-shadow:0 0 20px rgba(232,189,92,.5);}
+  .logo-badge .sub{font-size:13px;letter-spacing:.3em;color:var(--ink-dim);}
+
+  .qno-big{font-family:'Cinzel',serif;font-size:22px;letter-spacing:.3em;color:var(--ink-dim);margin-bottom:14px;}
+  .qtext-big{font-size:42px;font-weight:700;max-width:1100px;text-align:center;line-height:1.35;margin-bottom:46px;}
+  .qimg{max-height:280px;border-radius:14px;margin-bottom:24px;border:2px solid var(--line);}
+  .opts-big{display:grid;grid-template-columns:1fr 1fr;gap:22px;width:100%;max-width:1100px;}
+  .opt-big{
+    font-size:26px;font-weight:600;padding:26px 30px;display:flex;align-items:center;gap:18px;
+    border-radius:16px;border:2px solid var(--line);
+    background:linear-gradient(180deg, rgba(91,42,158,0.35), rgba(19,15,48,0.6));
+  }
+  .opt-big .tag{width:52px;height:52px;font-size:24px;border-radius:12px;background:linear-gradient(180deg,var(--gold-bright),var(--gold));color:#241a10;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:900;flex-shrink:0;}
+  .opt-big.correct{background:linear-gradient(180deg,#5cdb8f,#2e9c5c);border-color:var(--green);box-shadow:0 0 50px rgba(63,191,106,.5);color:#fff;}
+  .opt-big.correct .tag{background:#fff;color:#1c6b3a;}
+  .opt-big.wrong{background:linear-gradient(180deg,#f16a78,#b3212f);border-color:var(--red);color:#fff;}
+  .opt-big.wrong .tag{background:#fff;color:#8a1622;}
+  .opt-big.eliminated{opacity:.12;}
+  .opt-big.selected{background:linear-gradient(180deg,#ffcf8a,#e8973c);border-color:#e8973c;box-shadow:0 0 50px rgba(232,151,60,.5);color:#2a1400;}
+  .opt-big.selected .tag{background:#fff;color:#8a4e10;}
+
+  .timer-big{position:absolute;top:36px;right:44px;}
+  .timer-big .timer-ring{width:120px;height:120px;font-size:40px;}
+
+  .buzzer-order{position:absolute;left:44px;top:130px;width:300px;}
+  .buzzer-order .item{padding:12px 16px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid var(--line);margin-bottom:8px;font-weight:700;display:flex;justify-content:space-between;}
+  .buzzer-order .item.answering{border-color:var(--gold);box-shadow:0 0 20px rgba(232,189,92,.35);}
+  .buzzer-order .item.eligible2{border-color:var(--purple-bright);}
+
+  .scoreboard{position:absolute;right:44px;top:130px;width:320px;}
+  .scoreboard .row{display:flex;justify-content:space-between;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line);margin-bottom:8px;font-weight:700;}
+
+  .result-banner{font-family:'Cinzel Decorative',serif;font-size:64px;margin-bottom:14px;}
+  .result-banner.correct{color:var(--green);text-shadow:0 0 40px rgba(63,191,106,.6);}
+  .result-banner.wrong{color:var(--red);text-shadow:0 0 40px rgba(226,73,90,.6);}
+  .result-team{font-size:28px;color:var(--ink-dim);}
+
+  .poll-bars{width:100%;max-width:900px;}
+  .poll-row{display:flex;align-items:center;gap:18px;margin-bottom:20px;}
+  .poll-row .tag{width:48px;height:48px;border-radius:12px;background:linear-gradient(180deg,var(--gold-bright),var(--gold));color:#241a10;display:flex;align-items:center;justify-content:center;font-family:'Cinzel',serif;font-weight:900;flex-shrink:0;font-size:20px;}
+  .poll-row .track{flex:1;height:34px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;}
+  .poll-row .fill{height:100%;background:linear-gradient(90deg,var(--purple),var(--gold));border-radius:999px;transition:width 1s ease;width:0;}
+  .poll-row .pct{width:80px;text-align:right;font-size:24px;font-weight:800;}
+
+  .leaderboard-row{display:flex;align-items:center;gap:22px;width:100%;max-width:800px;padding:18px 26px;margin-bottom:14px;border-radius:14px;background:rgba(255,255,255,.03);border:1px solid var(--line);}
+  .leaderboard-row .rank{font-family:'Cinzel',serif;font-size:30px;color:var(--gold-bright);width:50px;}
+  .leaderboard-row .name{flex:1;font-size:26px;font-weight:700;}
+  .leaderboard-row .pts{font-size:28px;font-weight:900;color:var(--gold-bright);}
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <img src="shared/logo.png" alt="logo" style="position:absolute;top:20px;left:36px;height:70px;">
+  <div class="logo-badge"><div class="title">KAUN BANEGA GYANI</div><div class="sub">VSD PRABHU POOJA &amp; GURU VANDAN QUIZ</div></div>
+  <div id="content" style="margin-top:70px;display:flex;flex-direction:column;align-items:center;">
+    <div class="chakra"></div>
+    <div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Get ready — the quiz is about to begin</div>
+  </div>
+</div>
+
+<script src="shared/supabase-client.js"></script>
+<script>
+let session = null, question = null, teams = [];
+
+window.addEventListener('DOMContentLoaded', boot);
+
+async function boot() {
+  const event = await getActiveEvent();
+  session = await getSessionForEvent(event.id);
+  await loadTeams(event.id);
+  await render();
+
+  sb.channel('screen-session-' + session.event_id)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
+      async (payload) => { session = payload.new; await render(); })
+    .subscribe();
+
+  sb.channel('screen-teams-' + event.id)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_teams', filter: `event_id=eq.${event.id}` },
+      async () => { await loadTeams(event.id); if (['QUESTION_DISPLAY','BUZZER_OPEN','BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) renderSidebars(); })
+    .subscribe();
+
+  sb.channel('screen-buzzers')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_buzzers' },
+      async () => { if (session.current_question_id) renderSidebars(); })
+    .subscribe();
+}
+
+async function loadTeams(eventId) {
+  const { data } = await sb.from('quiz_teams').select('*').eq('event_id', eventId).order('points', { ascending: false });
+  teams = data || [];
+}
+
+async function render() {
+  const content = document.getElementById('content');
+  clearOverlays();
+
+  if (!session.current_question_id) {
+    content.innerHTML = `<div class="chakra"></div><div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Get ready — the quiz is about to begin</div>`;
+    return;
+  }
+
+  if (!question || question.id !== session.current_question_id) {
+    const { data } = await sb.from('quiz_questions_public').select('*').eq('id', session.current_question_id).single();
+    question = data;
+  }
+
+  if (session.state === 'QUESTION_DISPLAY') {
+    content.innerHTML = questionHtml();
+    if (session.timer_end) renderTimer('try_close_simple_timer');
+    return;
+  }
+
+  if (session.state === 'ANSWER_SELECTED') {
+    content.innerHTML = questionHtml(session.last_result?.selected_option, null);
+    return;
+  }
+
+  if (['BUZZER_OPEN','BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) {
+    content.innerHTML = questionHtml();
+    renderTimer('try_close_buzzer');
+    await renderSidebars();
+    if (session.state === 'PASSING') {
+      const r = session.last_result;
+      const team = teams.find(t => t.id === r?.team_id);
+      const banner = document.createElement('div');
+      banner.className = 'pop-in result-overlay';
+      banner.style = 'position:absolute;bottom:60px;background:rgba(10,8,32,.9);padding:16px 32px;border-radius:14px;border:1px solid var(--red);';
+      banner.innerHTML = `<span style="color:var(--red);font-weight:800;font-size:22px;">${team?team.team_name:''} WRONG ${r?.points} — PASSING TO NEXT TEAM</span>`;
+      document.getElementById('stage').appendChild(banner);
+    }
+    return;
+  }
+
+  if (session.state === 'AUDIENCE_POLL_OPEN') {
+    content.innerHTML = pollOpenHtml();
+    renderTimer('try_close_audience_poll');
+    return;
+  }
+
+  if (session.state === 'AUDIENCE_POLL_CLOSED') {
+    content.innerHTML = `<div class="chakra"></div><div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Calculating results…</div>`;
+    return;
+  }
+
+  if (session.state === 'RESULT_REVEAL') {
+    if (session.last_result?.kind === 'AUDIENCE_POLL') {
+      content.innerHTML = pollResultHtml(session.last_result.results || []);
+    } else if (session.last_result?.selected_option) {
+      // Manual-select (simple round) flow: show the question with the
+      // selected option and the correct option color-coded.
+      content.innerHTML = questionHtml(session.last_result.selected_option, session.last_result.correct_option);
+      const team = teams.find(t => t.id === session.last_result.team_id);
+      const banner = document.createElement('div');
+      banner.className = 'pop-in result-overlay';
+      banner.style = 'position:absolute;bottom:50px;background:rgba(10,8,32,.9);padding:14px 28px;border-radius:14px;border:1px solid var(--gold);';
+      banner.innerHTML = `<span style="font-weight:800;font-size:22px;color:${session.last_result.correct?'var(--green)':'var(--red)'}">${team?team.team_name:''} ${session.last_result.correct?'CORRECT':'WRONG'} ${session.last_result.points>0?'+':''}${session.last_result.points} pts</span>`;
+      document.getElementById('stage').appendChild(banner);
+    } else {
+      const r = session.last_result;
+      const team = teams.find(t => t.id === r?.team_id);
+      content.innerHTML = `
+        <div class="result-banner ${r?.correct?'correct':'wrong'} pop-in">${r?.correct?'CORRECT!':'WRONG!'}</div>
+        <div class="result-team">${team?team.team_name:''} ${r?.points>0?'+':''}${r?.points||0} points</div>`;
+    }
+    return;
+  }
+
+  if (session.state === 'QUESTION_COMPLETE') {
+    content.innerHTML = `<div class="chakra"></div><div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Question complete</div>`;
+    return;
+  }
+
+  if (session.state === 'LEADERBOARD') {
+    content.innerHTML = leaderboardHtml();
+    return;
+  }
+
+  if (session.state === 'INTRO_CARD') {
+    content.innerHTML = introCardHtml(session.intro_content);
+    return;
+  }
+
+  content.innerHTML = `<div class="chakra"></div>`;
+}
+
+function introCardHtml(intro) {
+  if (!intro) return `<div class="chakra"></div>`;
+  if (intro.kind === 'LIFELINES') {
+    return `<div class="qno-big">LIFELINES</div>
+      <div class="opts-big fade-in" style="grid-template-columns:1fr;max-width:900px;">
+        ${(intro.items||[]).map(i => `
+          <div class="opt-big" style="text-align:left;font-size:20px;">
+            <div class="tag" style="font-size:14px;">${i.type.slice(0,2)}</div>
+            <div>
+              <div style="font-weight:800;margin-bottom:4px;">${i.type.replace('_',' ')} — unlocks at ${i.unlock_threshold} pts${i.revive_threshold?`, revives at ${i.revive_threshold} pts`:''}</div>
+              <div style="font-size:16px;color:var(--ink-dim);font-weight:400;">${i.description||''}</div>
+            </div>
+          </div>`).join('')}
+      </div>`;
+  }
+  if (intro.kind === 'ROUND') {
+    return `<div class="qno-big">ROUND ${intro.round_no}</div>
+      <div class="qtext-big fade-in">${intro.round_name}</div>
+      <div style="font-size:22px;color:var(--ink-dim);max-width:900px;text-align:center;line-height:1.5;">${intro.description||''}</div>`;
+  }
+  if (intro.kind === 'ROUND_TRANSITION') {
+    return `<div class="qno-big">ROUND ${intro.ended_round_no} COMPLETE</div>
+      <div class="qtext-big fade-in" style="font-size:30px;color:var(--ink-dim);">${intro.ended_round_name}</div>
+      ${intro.next_round_name ? `
+        <div class="qno-big" style="margin-top:30px;color:var(--gold-bright);">ROUND ${intro.next_round_no} BEGINS</div>
+        <div class="qtext-big fade-in">${intro.next_round_name}</div>
+        <div style="font-size:20px;color:var(--ink-dim);max-width:900px;text-align:center;">${intro.next_round_description||''}</div>`
+      : `<div style="font-size:26px;color:var(--gold-bright);margin-top:20px;">That was the final round!</div>`}`;
+  }
+  return `<div class="chakra"></div>`;
+}
+
+function clearOverlays() {
+  document.querySelectorAll('.buzzer-order, .scoreboard, .timer-big, .stage > .pop-in.result-overlay').forEach(el => el.remove());
+}
+
+function questionHtml(selectedOption, correctOption) {
+  const q = question;
+  const cls = (letter) => {
+    if (correctOption) return letter === correctOption ? 'correct' : (letter === selectedOption ? 'wrong' : '');
+    if (selectedOption) return letter === selectedOption ? 'selected' : '';
+    return '';
+  };
+  return `
+    <div class="qno-big">QUESTION ${q.question_no}</div>
+    ${q.image_url ? `<img class="qimg" src="${q.image_url}">` : ''}
+    <div class="qtext-big fade-in">${q.question}</div>
+    <div class="opts-big fade-in">
+      <div class="opt-big ${cls('A')}"><div class="tag">A</div>${q.option_a||''}</div>
+      <div class="opt-big ${cls('B')}"><div class="tag">B</div>${q.option_b||''}</div>
+      <div class="opt-big ${cls('C')}"><div class="tag">C</div>${q.option_c||''}</div>
+      <div class="opt-big ${cls('D')}"><div class="tag">D</div>${q.option_d||''}</div>
+    </div>`;
+}
+
+function pollOpenHtml() {
+  const q = question;
+  return `
+    <div class="qno-big">AUDIENCE POLL · QUESTION ${q.question_no}</div>
+    <div class="qtext-big fade-in">${q.question}</div>
+    <div class="opts-big fade-in">
+      <div class="opt-big"><div class="tag">A</div>${q.option_a||''}</div>
+      <div class="opt-big"><div class="tag">B</div>${q.option_b||''}</div>
+      <div class="opt-big"><div class="tag">C</div>${q.option_c||''}</div>
+      <div class="opt-big"><div class="tag">D</div>${q.option_d||''}</div>
+    </div>`;
+}
+
+function pollResultHtml(rows) {
+  return `<div class="qno-big">AUDIENCE RESULT</div>
+    <div class="poll-bars">
+      ${rows.map(r => `<div class="poll-row"><div class="tag">${r.option}</div><div class="track"><div class="fill" data-w="${r.pct}"></div></div><div class="pct">${r.pct}%</div></div>`).join('')}
+    </div>` + `<script>setTimeout(()=>document.querySelectorAll('.poll-row .fill').forEach(f=>f.style.width=f.dataset.w+'%'),100)</` + `script>`;
+}
+
+function leaderboardHtml() {
+  return `<div class="qno-big">LEADERBOARD</div>` +
+    teams.slice(0,8).map((t,i) => `
+    <div class="leaderboard-row pop-in" style="animation-delay:${i*0.15}s">
+      <div class="rank">#${i+1}</div><div class="name">${t.team_name}</div><div class="pts">${t.points}</div>
+    </div>`).join('');
+}
+
+function renderTimer(closeRpcName) {
+  const t = document.createElement('div');
+  t.className = 'timer-big';
+  const initial = session.timer_paused ? (session.timer_remaining_seconds ?? 0) : secondsRemaining(session.timer_end);
+  t.innerHTML = `<div class="timer-ring" id="screenTimer">${initial}</div>`;
+  document.getElementById('stage').appendChild(t);
+  clearInterval(window._timerInt);
+  window._timerInt = setInterval(async () => {
+    if (session.timer_paused) {
+      const el = document.getElementById('screenTimer');
+      if (el) el.textContent = session.timer_remaining_seconds ?? 0;
+      return; // frozen — don't count down, don't auto-close
+    }
+    const secs = secondsRemaining(session.timer_end);
+    const el = document.getElementById('screenTimer');
+    if (el) { el.textContent = secs; el.className = 'timer-ring ' + (secs<=5?'urgent':''); }
+    else clearInterval(window._timerInt);
+    if (secs <= 0) {
+      clearInterval(window._timerInt);
+      if (closeRpcName) await sb.rpc(closeRpcName, { p_session_id: session.id });
+    }
+  }, 300);
+}
+
+async function renderSidebars() {
+  document.querySelectorAll('.buzzer-order, .scoreboard').forEach(el => el.remove());
+
+  const { data: buzzes } = await sb.from('quiz_buzzers').select('*, quiz_teams(team_name)').eq('question_id', session.current_question_id).order('sequence_no');
+  const bo = document.createElement('div');
+  bo.className = 'buzzer-order';
+  bo.innerHTML = `<div class="eyebrow" style="margin-bottom:10px;">Buzzer Order</div>` +
+    (buzzes||[]).map((b,i) => {
+      const isAnswering = session.answering_team_id === b.team_id;
+      const cls = isAnswering ? 'answering' : (b.eligible ? '' : 'eligible2');
+      return `<div class="item ${cls}">${i+1}. ${b.quiz_teams?.team_name||''} ${b.eligible?'':'<span style=\"opacity:.5;font-size:11px\">NOT ELIGIBLE</span>'}</div>`;
+    }).join('');
+  document.getElementById('stage').appendChild(bo);
+
+  const sb2 = document.createElement('div');
+  sb2.className = 'scoreboard';
+  sb2.innerHTML = `<div class="eyebrow" style="margin-bottom:10px;">Scoreboard</div>` +
+    [...teams].sort((a,b)=>b.points-a.points).map(t => `<div class="row"><span>${t.team_name}</span><span>${t.points}</span></div>`).join('');
+  document.getElementById('stage').appendChild(sb2);
+}
+</script>
+</body>
+</html>

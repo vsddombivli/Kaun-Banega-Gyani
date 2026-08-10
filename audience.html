@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>VSD Quiz — Audience Poll</title>
+<link rel="stylesheet" href="shared/theme.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // jsdelivr is primary; if it's blocked/unreachable, synchronously fall
+  // back to unpkg before the parser continues to the next script tag.
+  if (typeof supabase === 'undefined') {
+    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+  }
+</script>
+<style>
+  body{display:flex;flex-direction:column;min-height:100vh;}
+  .wrap{flex:1;display:flex;flex-direction:column;padding:20px;max-width:520px;margin:0 auto;width:100%;justify-content:center;gap:18px;}
+  .qtext{font-size:19px;font-weight:600;margin:6px 0 18px;line-height:1.4;text-align:center;}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .center{text-align:center;}
+  .resultbar{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+  .resultbar .track{flex:1;height:22px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;}
+  .resultbar .fill{height:100%;background:linear-gradient(90deg,var(--purple),var(--gold));border-radius:999px;transition:width .6s ease;}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <img src="shared/logo.png" alt="logo" style="height:44px;width:auto;align-self:flex-start;margin-bottom:14px;">
+  <div class="panel pop-in" style="padding:26px;" id="card">
+    <div class="eyebrow center">VSD Quiz · Audience Poll</div>
+    <div class="chakra" style="margin:24px auto;"></div>
+    <div class="status-line center">Waiting for the next poll question…</div>
+  </div>
+</div>
+
+<script src="shared/supabase-client.js"></script>
+<script>
+let session = null, question = null, voted = false;
+const deviceId = getDeviceId(); // used as anonymous audience session id
+
+window.addEventListener('DOMContentLoaded', boot);
+
+async function boot() {
+  const event = await getActiveEvent();
+  session = await getSessionForEvent(event.id);
+  await render();
+  sb.channel('audience-session-' + session.event_id)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
+      async (payload) => { session = payload.new; voted = false; await render(); })
+    .subscribe();
+}
+
+async function render() {
+  const card = document.getElementById('card');
+
+  if (!session.current_question_id) {
+    card.innerHTML = waitingHtml('Waiting for the next poll question…');
+    return;
+  }
+
+  if (!question || question.id !== session.current_question_id) {
+    const { data } = await sb.from('quiz_questions_public').select('*').eq('id', session.current_question_id).single();
+    question = data;
+    const { data: existing } = await sb.from('quiz_audience_votes').select('id').eq('question_id', question.id).eq('session_id', deviceId);
+    voted = existing && existing.length > 0;
+  }
+
+  if (session.state === 'AUDIENCE_POLL_OPEN' && !voted) {
+    card.innerHTML = pollHtml();
+    tickAudienceTimer();
+    return;
+  }
+
+  if (session.state === 'AUDIENCE_POLL_OPEN' && voted) {
+    card.innerHTML = waitingHtml('✓ Your answer has been recorded.<br>Please wait for the result.');
+    return;
+  }
+
+  if (session.state === 'RESULT_REVEAL' && session.last_result?.kind === 'AUDIENCE_POLL') {
+    card.innerHTML = resultsHtml(session.last_result.results || []);
+    return;
+  }
+
+  card.innerHTML = waitingHtml('Standby for the next poll question…');
+}
+
+function waitingHtml(msg) {
+  return `<div class="eyebrow center">VSD Quiz · Audience Poll</div>
+  <div class="chakra" style="margin:24px auto;"></div>
+  <div class="status-line center">${msg}</div>`;
+}
+
+function pollHtml() {
+  const q = question;
+  return `
+  <div class="eyebrow center">Question ${q.question_no}</div>
+  <div class="qtext">${q.question}</div>
+  <div class="center" style="margin-bottom:14px;"><span class="timer-ring" id="audTimer">${secondsRemaining(session.timer_end)}</span></div>
+  <div class="opts">
+    <div class="hex-option" onclick="vote('A')"><div class="tag">A</div>${q.option_a||''}</div>
+    <div class="hex-option" onclick="vote('B')"><div class="tag">B</div>${q.option_b||''}</div>
+    <div class="hex-option" onclick="vote('C')"><div class="tag">C</div>${q.option_c||''}</div>
+    <div class="hex-option" onclick="vote('D')"><div class="tag">D</div>${q.option_d||''}</div>
+  </div>`;
+}
+
+function resultsHtml(rows) {
+  const labels = { A: question.option_a, B: question.option_b, C: question.option_c, D: question.option_d };
+  return `<div class="eyebrow center">Live Result</div>
+  <div class="qtext">${question.question}</div>
+  ${rows.map(r => `
+    <div class="resultbar">
+      <div class="tag" style="flex-shrink:0">${r.option}</div>
+      <div class="track"><div class="fill" style="width:${r.pct}%"></div></div>
+      <div style="width:52px;text-align:right;font-weight:700;">${r.pct}%</div>
+    </div>`).join('')}`;
+}
+
+let timerInterval = null;
+function tickAudienceTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(async () => {
+    if (session.timer_paused) {
+      const el = document.getElementById('audTimer');
+      if (el) el.textContent = session.timer_remaining_seconds ?? 0;
+      return;
+    }
+    const secs = secondsRemaining(session.timer_end);
+    const el = document.getElementById('audTimer');
+    if (el) el.textContent = secs;
+    if (secs <= 0) {
+      clearInterval(timerInterval);
+      await sb.rpc('try_close_audience_poll', { p_session_id: session.id });
+    }
+  }, 300);
+}
+
+async function vote(option) {
+  const { error } = await sb.rpc('submit_vote', { p_session_id: session.id, p_session_device_id: deviceId, p_option: option });
+  if (error) { toast(error.message); return; }
+  voted = true;
+  await render();
+}
+</script>
+</body>
+</html>

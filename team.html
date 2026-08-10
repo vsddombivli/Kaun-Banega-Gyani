@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>VSD Quiz — Team</title>
+<link rel="stylesheet" href="shared/theme.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // jsdelivr is primary; if it's blocked/unreachable, synchronously fall
+  // back to unpkg before the parser continues to the next script tag.
+  if (typeof supabase === 'undefined') {
+    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+  }
+</script>
+<style>
+  body{display:flex;flex-direction:column;min-height:100vh;}
+  .wrap{flex:1;display:flex;flex-direction:column;padding:20px;max-width:520px;margin:0 auto;width:100%;}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
+  .team-name{font-family:'Cinzel',serif;font-size:22px;color:var(--gold-bright);}
+  .qcard{padding:22px;margin-bottom:16px;}
+  .qno{font-size:13px;color:var(--ink-dim);letter-spacing:.2em;text-transform:uppercase;}
+  .qtext{font-size:19px;font-weight:600;margin:10px 0 18px;line-height:1.4;}
+  .opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;}
+  .center{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:16px;}
+  #buzzBtn{
+    width:220px;height:220px;border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #ff6a7a, #b3212f 70%);
+    border:6px solid #7a0f1a; color:#fff; font-family:'Cinzel',serif;
+    font-size:30px; font-weight:900; letter-spacing:.1em;
+    box-shadow:0 0 60px rgba(226,73,90,.55), inset 0 -8px 20px rgba(0,0,0,.35);
+    cursor:pointer;
+  }
+  #buzzBtn:active{transform:scale(.95);}
+  #buzzBtn:disabled{filter:grayscale(1) brightness(.5);cursor:not-allowed;}
+  .status-line{font-size:16px;font-weight:600;color:var(--ink-dim);}
+  .join-box{margin:auto;max-width:380px;width:100%;padding:28px;text-align:center;}
+  .join-box input{text-align:center;letter-spacing:.3em;font-size:20px;text-transform:uppercase;margin:16px 0;}
+  .position-badge{font-family:'Cinzel',serif;font-size:15px;padding:8px 18px;border-radius:999px;border:1px solid var(--gold);}
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="join-box panel fade-in" id="joinBox">
+    <div class="eyebrow">VSD Quiz</div>
+    <h1>Join Your Team</h1>
+    <p style="color:var(--ink-dim)">Enter the code given to your team captain</p>
+    <input id="codeInput" placeholder="TEAM CODE" maxlength="6">
+    <button class="btn btn-gold btn-lg" style="width:100%" onclick="joinTeam()">JOIN QUIZ</button>
+    <div id="joinError" style="color:var(--red);margin-top:10px;font-size:14px;"></div>
+  </div>
+
+  <div id="mainBox" style="display:none;flex:1;flex-direction:column;">
+    <div class="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <img src="shared/logo.png" alt="logo" style="height:38px;">
+        <div class="team-name" id="teamNameEl">—</div>
+      </div>
+      <div class="badge" id="scoreBadge">0 PTS</div>
+    </div>
+    <div id="content" class="center">
+      <div class="chakra"></div>
+      <div class="status-line">Waiting for the next question…</div>
+    </div>
+  </div>
+</div>
+
+<script src="shared/supabase-client.js"></script>
+<script>
+let team = null;
+let session = null;
+let question = null;
+let currentRound = null;
+let buzzChannel = null;
+
+const deviceId = getDeviceId();
+
+// Restore session on refresh
+window.addEventListener('DOMContentLoaded', () => {
+  const savedCode = localStorage.getItem('vsd_team_code');
+  if (savedCode) { document.getElementById('codeInput').value = savedCode; joinTeam(true); }
+});
+
+async function joinTeam(silent = false) {
+  const code = document.getElementById('codeInput').value.trim().toUpperCase();
+  if (!code) return;
+  const { data, error } = await sb.rpc('join_team', { p_team_code: code, p_device_id: deviceId });
+  if (error) {
+    document.getElementById('joinError').textContent = error.message;
+    if (!silent) return;
+  }
+  if (!data) return;
+  team = data;
+  localStorage.setItem('vsd_team_code', code);
+  document.getElementById('joinBox').style.display = 'none';
+  document.getElementById('mainBox').style.display = 'flex';
+  document.getElementById('teamNameEl').textContent = team.team_name;
+  await bootSession();
+  subscribeRealtime();
+}
+
+async function bootSession() {
+  const event = await getActiveEvent();
+  session = await getSessionForEvent(event.id);
+  await refreshTeamScore();
+  await render();
+}
+
+async function refreshTeamScore() {
+  const { data } = await sb.from('quiz_teams').select('points').eq('id', team.id).single();
+  if (data) document.getElementById('scoreBadge').textContent = `${data.points} PTS`;
+}
+
+function subscribeRealtime() {
+  sb.channel('team-session-' + session.event_id)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
+      async (payload) => { session = payload.new; await render(); })
+    .subscribe();
+
+  sb.channel('team-score-' + team.id)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_teams', filter: `id=eq.${team.id}` },
+      (payload) => { document.getElementById('scoreBadge').textContent = `${payload.new.points} PTS`; })
+    .subscribe();
+}
+
+async function render() {
+  const content = document.getElementById('content');
+
+  if (!session.current_question_id) {
+    content.className = 'center';
+    content.innerHTML = `<div class="chakra"></div><div class="status-line">Waiting for the next question…</div>`;
+    return;
+  }
+
+  if (!question || question.id !== session.current_question_id) {
+    const { data } = await sb.from('quiz_questions_public').select('*').eq('id', session.current_question_id).single();
+    question = data;
+    const { data: r } = await sb.from('quiz_rounds').select('*').eq('id', question.round_id).single();
+    currentRound = r;
+  }
+
+  if (session.state === 'QUESTION_DISPLAY') {
+    content.className = '';
+    content.innerHTML = questionCardHtml();
+    if (session.timer_paused) {
+      content.innerHTML += `<div class="center" style="margin-top:16px;"><div class="timer-ring" id="teamSimpleTimer">${session.timer_remaining_seconds ?? 0}</div>
+        <div class="status-line">Paused — admin will resume shortly.</div></div>`;
+    } else if (session.timer_end) {
+      const secs = secondsRemaining(session.timer_end);
+      content.innerHTML += `<div class="center" style="margin-top:16px;"><div class="timer-ring ${secs<=5?'urgent':''}" id="teamSimpleTimer">${secs}</div>
+        <div class="status-line">Answer verbally — admin will record who answered.</div></div>`;
+      tickSimpleTimer();
+    } else {
+      const msg = currentRound && currentRound.has_buzzer ? 'Waiting for buzzer to open…' : 'Get ready…';
+      content.innerHTML += `<div class="status-line" style="margin-top:16px;">${msg}</div>`;
+    }
+    return;
+  }
+
+  if (session.state === 'ANSWER_SELECTED') {
+    content.className = 'center';
+    const answeringTeam = session.answering_team_id === team.id;
+    content.innerHTML = `<div class="chakra"></div><div class="status-line">${answeringTeam ? 'Your answer has been recorded — waiting for reveal.' : 'Another team\'s answer is being recorded.'}</div>`;
+    return;
+  }
+
+  if (session.state === 'BUZZER_OPEN') {
+    content.className = 'center';
+    const secs = secondsRemaining(session.timer_end);
+    content.innerHTML = `
+      <div class="timer-ring ${secs<=5?'urgent':''}" id="teamTimer">${secs}</div>
+      <button id="buzzBtn" onclick="buzz()">BUZZ</button>
+      <div class="status-line">Buzzer is OPEN — press now!</div>`;
+    tickTeamTimer();
+    checkMyBuzzStatus();
+    return;
+  }
+
+  if (['BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) {
+    content.className = 'center';
+    const mine = await myBuzzPosition();
+    let line = 'Buzzer closed.';
+    if (mine === 1) line = session.answering_team_id === team.id ? "You buzzed first — your team is answering!" : "You buzzed first — waiting on your call.";
+    else if (mine === 2) line = session.answering_team_id === team.id ? "You buzzed second — your turn now!" : "You buzzed second — waiting for first team.";
+    else if (mine === 0) line = "Buzzer closed. You didn't buzz in time.";
+    else if (mine === null) line = "Buzzer closed. Another team wasn't eligible this round.";
+    content.innerHTML = `<div class="chakra"></div><div class="status-line">${line}</div>`;
+    return;
+  }
+
+  if (session.state === 'RESULT_REVEAL' || session.state === 'QUESTION_COMPLETE') {
+    content.className = 'center';
+    const r = session.last_result;
+    if (r && r.team_id === team.id) {
+      content.innerHTML = `<div class="pop-in status-line" style="font-size:24px;color:${r.correct?'var(--green)':'var(--red)'}">
+        ${r.correct ? 'CORRECT!' : 'WRONG'} ${r.points>0?'+':''}${r.points} pts</div>`;
+    } else {
+      content.innerHTML = `<div class="chakra"></div><div class="status-line">Question complete. Get ready for the next one.</div>`;
+    }
+    await refreshTeamScore();
+    return;
+  }
+
+  if (session.state === 'AUDIENCE_POLL_OPEN') {
+    content.className = 'center';
+    content.innerHTML = `<div class="chakra"></div><div class="status-line">Audience poll in progress — watch the big screen!</div>`;
+    return;
+  }
+
+  content.className = 'center';
+  content.innerHTML = `<div class="chakra"></div><div class="status-line">Standby…</div>`;
+}
+
+function questionCardHtml() {
+  const q = question;
+  return `
+  <div class="qcard panel pop-in">
+    <div class="qno">Question ${q.question_no}</div>
+    <div class="qtext">${q.question}</div>
+    <div class="opts">
+      <div class="hex-option"><div class="tag">A</div>${q.option_a||''}</div>
+      <div class="hex-option"><div class="tag">B</div>${q.option_b||''}</div>
+      <div class="hex-option"><div class="tag">C</div>${q.option_c||''}</div>
+      <div class="hex-option"><div class="tag">D</div>${q.option_d||''}</div>
+    </div>
+  </div>`;
+}
+
+let timerInterval = null;
+function tickTeamTimer() {
+  clearInterval(timerInterval);
+  timerInterval = setInterval(async () => {
+    if (session.timer_paused) {
+      const el = document.getElementById('teamTimer');
+      if (el) el.textContent = session.timer_remaining_seconds ?? 0;
+      return;
+    }
+    const secs = secondsRemaining(session.timer_end);
+    const el = document.getElementById('teamTimer');
+    if (el) { el.textContent = secs; el.className = 'timer-ring ' + (secs<=5?'urgent':''); }
+    if (secs <= 0) {
+      clearInterval(timerInterval);
+      await sb.rpc('try_close_buzzer', { p_session_id: session.id });
+    }
+  }, 300);
+}
+
+let simpleTimerInterval = null;
+function tickSimpleTimer() {
+  clearInterval(simpleTimerInterval);
+  simpleTimerInterval = setInterval(async () => {
+    if (session.timer_paused) {
+      const el = document.getElementById('teamSimpleTimer');
+      if (el) el.textContent = session.timer_remaining_seconds ?? 0;
+      return;
+    }
+    const secs = secondsRemaining(session.timer_end);
+    const el = document.getElementById('teamSimpleTimer');
+    if (el) { el.textContent = secs; el.className = 'timer-ring ' + (secs<=5?'urgent':''); }
+    else clearInterval(simpleTimerInterval);
+    if (secs <= 0) {
+      clearInterval(simpleTimerInterval);
+      await sb.rpc('try_close_simple_timer', { p_session_id: session.id });
+    }
+  }, 300);
+}
+
+async function buzz() {
+  const btn = document.getElementById('buzzBtn');
+  if (btn) btn.disabled = true;
+  const { error } = await sb.rpc('submit_buzzer', { p_session_id: session.id, p_team_id: team.id, p_device_id: deviceId });
+  if (error) { toast(error.message); if (btn) btn.disabled = false; }
+  else toast('Buzz recorded!');
+}
+
+async function checkMyBuzzStatus() {
+  const { data } = await sb.from('quiz_buzzers').select('team_id').eq('question_id', session.current_question_id).eq('team_id', team.id);
+  if (data && data.length) { const b = document.getElementById('buzzBtn'); if (b) b.disabled = true; }
+}
+
+async function myBuzzPosition() {
+  const { data } = await sb.from('quiz_buzzers').select('*').eq('question_id', session.current_question_id).order('sequence_no');
+  const mine = (data||[]).find(b => b.team_id === team.id);
+  if (!mine) return 0;
+  const idx = data.findIndex(b => b.team_id === team.id);
+  return idx + 1; // 1 or 2 (or higher = not eligible, handled by caller loosely)
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VSD Quiz — Control Room</title>
+<link rel="stylesheet" href="shared/theme.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // jsdelivr is primary; if it's blocked/unreachable, synchronously fall
+  // back to unpkg before the parser continues to the next script tag.
+  if (typeof supabase === 'undefined') {
+    document.write('<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>');
+  }
+</script>
+<style>
+  body{padding:0;}
+  .topnav{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--line);background:rgba(10,8,32,.7);position:sticky;top:0;z-index:10;}
+  .topnav .title{font-family:'Cinzel',serif;color:var(--gold-bright);font-size:19px;}
+  .tabs{display:flex;gap:8px;padding:14px 24px;flex-wrap:wrap;}
+  .tab{padding:9px 16px;border-radius:999px;border:1px solid var(--line);cursor:pointer;font-weight:600;font-size:13px;color:var(--ink-dim);}
+  .tab.active{background:var(--purple-bright);color:#fff;border-color:transparent;}
+  .page{padding:0 24px 40px;max-width:1400px;margin:0 auto;}
+  .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:20px;}
+  .card{padding:20px;margin-bottom:16px;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+  .qopts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0;}
+  table{width:100%;border-collapse:collapse;font-size:14px;}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--line);}
+  th{color:var(--ink-dim);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em;}
+  .pill{padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;border:1px solid var(--line);}
+  .pill.available{color:var(--green);border-color:var(--green);}
+  .pill.locked{color:var(--ink-dim);}
+  .pill.used{color:var(--red);border-color:var(--red);}
+  .buzz-item{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.03);border:1px solid var(--line);margin-bottom:8px;}
+  .state-badge{font-family:'Cinzel',serif;letter-spacing:.1em;font-size:13px;}
+  .qtext-adm{font-size:17px;font-weight:600;margin:10px 0;}
+  .danger-zone{border-color:var(--red);}
+  label{font-size:12px;color:var(--ink-dim);display:block;margin-bottom:4px;}
+  .field{margin-bottom:12px;}
+</style>
+</head>
+<body>
+
+<div id="loginScreen" style="min-height:100vh;display:flex;align-items:center;justify-content:center;">
+  <div class="panel" style="padding:32px;max-width:360px;width:100%;">
+    <div class="eyebrow">VSD Quiz</div>
+    <h1 style="margin-bottom:18px;">Admin Login</h1>
+    <div class="field"><label>Email</label><input id="loginEmail" type="email"></div>
+    <div class="field"><label>Password</label><input id="loginPass" type="password"></div>
+    <button class="btn btn-gold" style="width:100%" onclick="login()">Sign In</button>
+    <div id="loginError" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
+  </div>
+</div>
+
+<div id="adminApp" style="display:none;">
+  <div class="topnav">
+    <div class="row" style="gap:12px;"><img src="shared/logo.png" alt="logo" style="height:40px;"><div class="title">VSD QUIZ · CONTROL ROOM</div></div>
+    <div class="row"><span id="whoami" style="color:var(--ink-dim);font-size:13px;"></span><button class="btn btn-outline" onclick="logout()">Sign Out</button></div>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="control" onclick="showTab('control')">Control Room</div>
+    <div class="tab" data-tab="questions" onclick="showTab('questions')">Question Bank</div>
+    <div class="tab" data-tab="teams" onclick="showTab('teams')">Teams</div>
+    <div class="tab" data-tab="registration" onclick="showTab('registration')">Registration</div>
+    <div class="tab" data-tab="lifelines" onclick="showTab('lifelines')">Lifelines</div>
+  </div>
+
+  <div class="page" id="page-control">
+    <div class="grid2">
+      <div>
+        <div class="card panel">
+          <div class="row" style="justify-content:space-between;">
+            <div>
+              <label>Round</label>
+              <select id="roundSelect" onchange="loadQuestionsForRound()"></select>
+            </div>
+            <div>
+              <label>Question</label>
+              <select id="questionSelect"></select>
+            </div>
+            <div style="text-align:right;">
+              <label>Live State</label>
+              <div class="state-badge" id="stateBadge">—</div>
+            </div>
+          </div>
+          <div id="qPreview" class="qtext-adm">Select a question and press SHOW QUESTION.</div>
+          <div class="qopts" id="qPreviewOpts"></div>
+
+          <div class="row" style="margin-top:14px;">
+            <button class="btn btn-gold" onclick="pushQuestion()">SHOW QUESTION</button>
+            <button class="btn" id="btnOpenBuzzer" onclick="openBuzzer()">OPEN BUZZER</button>
+            <button class="btn" id="btnStartTimer" style="display:none;" onclick="startSimpleTimer()">START TIMER (manual restart)</button>
+            <button class="btn btn-gold" id="btnPauseResume" style="display:none;" onclick="pauseOrResumeTimer()">PAUSE TIMER</button>
+            <button class="btn btn-outline" onclick="showRoundIntro()">SHOW ROUND RULES</button>
+            <button class="btn btn-outline" onclick="showLifelinesIntro()">SHOW LIFELINES</button>
+            <button class="btn btn-outline" onclick="dismissIntro()">DISMISS INTRO CARD</button>
+            <button class="btn" onclick="openPoll()">START AUDIENCE POLL</button>
+            <button class="btn" onclick="revealResult()">REVEAL ANSWER</button>
+            <button class="btn" onclick="completeQuestion()">COMPLETE / NEXT</button>
+            <button class="btn btn-danger" onclick="resetQuestion()">RESET QUESTION</button>
+            <button class="btn btn-danger" onclick="endRound()">END ROUND</button>
+          </div>
+        </div>
+
+        <div class="card panel" id="simpleAnswerCard" style="display:none;">
+          <h3 style="margin-bottom:10px;">Record Verbal Answer (simple round)</h3>
+          <div class="row">
+            <select id="simpleTeam"></select>
+            <select id="simpleOption"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+            <button class="btn btn-gold" onclick="recordSimpleAnswer()">SELECT — SHOW ORANGE</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">Then click REVEAL ANSWER above to grade it and turn it green/red on screen.</div>
+        </div>
+
+        <div class="card panel" id="answeringCard" style="display:none;">
+          <h3 style="margin-bottom:10px;">Currently Answering: <span id="answeringTeamName"></span> (position <span id="answeringPos"></span>)</h3>
+          <div class="row">
+            <button class="btn btn-gold" onclick="markAnswer(true)">CORRECT</button>
+            <button class="btn btn-danger" onclick="markAnswer(false)">WRONG</button>
+            <button class="btn btn-outline" onclick="advanceAnswerer()">ADVANCE TO NEXT ELIGIBLE TEAM</button>
+          </div>
+        </div>
+
+        <div class="card panel" id="buzzerOrderCard">
+          <h3 style="margin-bottom:10px;">Buzzer Order</h3>
+          <div id="buzzerOrderList" style="color:var(--ink-dim);font-size:14px;">No buzzes yet.</div>
+        </div>
+
+        <div class="card panel" id="rapidFireCard">
+          <h3 style="margin-bottom:10px;">Rapid Fire (mark per team, per question)</h3>
+          <div class="row" style="margin-bottom:10px;">
+            <select id="rfTeam"></select>
+            <button class="btn btn-gold" onclick="rapidFireMark(true)">CORRECT (+pts)</button>
+            <button class="btn btn-outline" onclick="rapidFireMark(false)">WRONG (0)</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-dim);">Uses the currently pushed question. No negative scoring.</div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card panel">
+          <h3 style="margin-bottom:10px;">Scoreboard</h3>
+          <table><thead><tr><th>Team</th><th>Score</th><th></th></tr></thead><tbody id="scoreTable"></tbody></table>
+        </div>
+        <div class="card panel">
+          <h3 style="margin-bottom:10px;">Quick Score Adjust</h3>
+          <div class="row">
+            <select id="adjTeam"></select>
+            <button class="btn" onclick="adjustScore(10)">+10</button>
+            <button class="btn" onclick="adjustScore(50)">+50</button>
+            <button class="btn" onclick="adjustScore(100)">+100</button>
+            <button class="btn btn-danger" onclick="adjustScore(-10)">-10</button>
+            <button class="btn btn-danger" onclick="adjustScore(-50)">-50</button>
+            <button class="btn btn-danger" onclick="adjustScore(-100)">-100</button>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <input id="customScoreVal" type="number" placeholder="Custom ±points" style="width:140px;">
+            <button class="btn btn-outline" onclick="adjustScoreCustom()">APPLY</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-questions" style="display:none;">
+    <div class="grid2">
+      <div class="card panel">
+        <div class="row" style="justify-content:space-between;">
+          <h3 id="roundFormTitle" style="margin-bottom:14px;">Add Round</h3>
+          <select id="editRoundPicker" onchange="loadRoundForEdit()" style="width:auto;"><option value="">— Edit existing round —</option></select>
+        </div>
+        <div class="field"><label>Round #</label><input id="rRoundNo" type="number"></div>
+        <div class="field"><label>Name</label><input id="rName" placeholder="e.g. Round 3 — Buzzer Round"></div>
+        <div class="field"><label>Description / Rules (shown to audience via SHOW ROUND RULES)</label><textarea id="rDescription" rows="2" placeholder="e.g. Buzz in after the question is read. First team gets 100 pts if correct, -100 if wrong. Second team gets 50/-100."></textarea></div>
+        <div class="field"><label>Type</label>
+          <select id="rType"><option>MCQ</option><option>BUZZER</option><option>RAPID_FIRE</option><option>AUDIENCE</option><option>VISUAL</option><option>LIFELINE</option></select>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>1st correct</label><input id="rFC" type="number" value="100"></div>
+          <div class="field" style="flex:1"><label>1st wrong</label><input id="rFW" type="number" value="-100"></div>
+          <div class="field" style="flex:1"><label>2nd correct</label><input id="rSC" type="number" value="50"></div>
+          <div class="field" style="flex:1"><label>2nd wrong</label><input id="rSW" type="number" value="-100"></div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Buzzer window (sec)</label><input id="rWindow" type="number" value="30"></div>
+          <div class="field" style="flex:1"><label>Rapid fire points</label><input id="rRF" type="number" value="100"></div>
+        </div>
+        <div class="row" style="margin-bottom:14px;">
+          <label style="margin:0;"><input type="checkbox" id="rHasBuzzer" style="width:auto;" checked> Uses buzzer</label>
+          <label style="margin:0;"><input type="checkbox" id="rHasRapidFire" style="width:auto;"> Uses rapid fire</label>
+          <span style="font-size:12px;color:var(--ink-dim);">(Leave both unchecked for a simple round — show question, run the time limit, score manually)</span>
+        </div>
+        <button class="btn btn-gold" id="roundSaveBtn" onclick="addRound()">ADD ROUND</button>
+        <button class="btn btn-danger" id="roundDeleteBtn" style="display:none;" onclick="deleteRound()">DELETE ROUND</button>
+        <button class="btn btn-outline" id="roundCancelBtn" style="display:none;" onclick="cancelRoundEdit()">CANCEL EDIT</button>
+      </div>
+
+      <div class="card panel">
+        <h3 id="questionFormTitle" style="margin-bottom:14px;">Add Question</h3>
+        <div class="field"><label>Round</label><select id="qbRound"></select></div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Question #</label><input id="qbNo" type="number"></div>
+          <div class="field" style="flex:1"><label>Type</label>
+            <select id="qbType"><option>MCQ</option><option>BUZZER</option><option>AUDIENCE</option><option>RAPID_FIRE</option><option>VISUAL</option></select>
+          </div>
+        </div>
+        <div class="field"><label>Question</label><textarea id="qbQuestion" rows="2"></textarea></div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Option A</label><input id="qbA"></div>
+          <div class="field" style="flex:1"><label>Option B</label><input id="qbB"></div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Option C</label><input id="qbC"></div>
+          <div class="field" style="flex:1"><label>Option D</label><input id="qbD"></div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1"><label>Correct</label>
+            <select id="qbCorrect"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+          </div>
+          <div class="field" style="flex:1"><label>Points</label><input id="qbPoints" type="number" value="100"></div>
+          <div class="field" style="flex:1"><label>Time limit (sec)</label><input id="qbTime" type="number" value="30"></div>
+        </div>
+        <div class="field"><label>Question Image (uploaded as-is — no compression, safe for projector)</label>
+          <input type="file" id="qbImageFile" accept="image/*" onchange="uploadQuestionImage()">
+          <div id="qbImageUploadStatus" style="font-size:12px;color:var(--ink-dim);margin-top:4px;"></div>
+          <img id="qbImagePreview" style="display:none;max-height:120px;margin-top:8px;border-radius:8px;border:1px solid var(--line);">
+          <input id="qbImage" placeholder="Image URL (auto-filled after upload, or paste one manually)" style="margin-top:8px;">
+        </div>
+        <button class="btn btn-gold" id="questionSaveBtn" onclick="addQuestion()">ADD QUESTION</button>
+        <button class="btn btn-outline" id="questionCancelBtn" style="display:none;" onclick="cancelQuestionEdit()">CANCEL EDIT</button>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <h3 style="margin-bottom:10px;">All Questions</h3>
+      <table><thead><tr><th>Round</th><th>#</th><th>Question</th><th>Type</th><th>Correct</th><th>Pts</th><th></th></tr></thead><tbody id="questionsTable"></tbody></table>
+    </div>
+  </div>
+
+  <div class="page" id="page-teams" style="display:none;">
+    <div class="grid2">
+      <div class="card panel">
+        <h3 style="margin-bottom:14px;">Add Team Name Slot</h3>
+        <div class="row"><input id="teamNameSlot" placeholder="e.g. NAVKAR"><button class="btn btn-gold" onclick="addTeamNameSlot()">ADD</button></div>
+        <div id="teamNameSlots" style="margin-top:12px;"></div>
+      </div>
+      <div class="card panel">
+        <h3 style="margin-bottom:10px;">Registered Teams</h3>
+        <table><thead><tr><th>Team</th><th>Code</th><th>Members</th><th>Score</th><th>Device</th><th></th></tr></thead><tbody id="teamsTable"></tbody></table>
+      </div>
+    </div>
+
+    <div class="card panel">
+      <h3 style="margin-bottom:14px;">Submitted Registrations — Full Detail</h3>
+      <div id="registrationCards" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-registration" style="display:none;">
+    <div class="card panel">
+      <h3 style="margin-bottom:14px;">Registration Form Settings <span class="pill" id="regStatusPill" style="margin-left:10px;"></span></h3>
+      <div class="field"><label>Form Header</label><input id="setRegHeader"></div>
+      <div class="field"><label>Form Description</label><textarea id="setRegDescription" rows="2"></textarea></div>
+      <div class="row">
+        <div class="field" style="flex:1"><label>Registration Opens</label><input id="setRegStart" type="datetime-local"></div>
+        <div class="field" style="flex:1"><label>Registration Closes</label><input id="setRegEnd" type="datetime-local"></div>
+      </div>
+      <div class="row" style="align-items:center;margin-bottom:14px;">
+        <label style="margin:0;"><input type="checkbox" id="setRegClosedManually" style="width:auto;"> Manually force registration CLOSED (overrides dates)</label>
+      </div>
+      <div style="font-size:12px;color:var(--ink-dim);margin-bottom:14px;">Registration also auto-closes automatically once every team name slot is taken — no action needed for that case.</div>
+      <button class="btn btn-gold" onclick="saveRegistrationSettings()">SAVE SETTINGS</button>
+    </div>
+  </div>
+
+  <div class="page" id="page-lifelines" style="display:none;">
+    <div class="card panel">
+      <h3 style="margin-bottom:6px;">Lifeline Definitions</h3>
+      <div style="font-size:12px;color:var(--ink-dim);margin-bottom:14px;">One row per lifeline type. Set the points needed to unlock it, an optional points threshold to auto-revive it once used, and a description shown on the projector via SHOW LIFELINES (Control Room tab).</div>
+      <div id="lifelineDefsEditor"></div>
+      <button class="btn btn-gold" style="margin-top:10px;" onclick="saveLifelineDefinitions()">SAVE ALL</button>
+    </div>
+    </div>
+    <div class="card panel">
+      <h3 style="margin-bottom:14px;">Team Lifeline Status</h3>
+      <div id="lifelinesGrid"></div>
+    </div>
+  </div>
+</div>
+
+<script src="shared/supabase-client.js"></script>
+<script>
+let currentUser = null, event = null, session = null, teams = [], rounds = [], questions = [], selectedQuestion = null;
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const { data } = await sb.auth.getSession();
+  if (data.session) { currentUser = data.session.user; await enterApp(); }
+});
+
+async function login() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) { document.getElementById('loginError').textContent = error.message; return; }
+  currentUser = data.user;
+  await enterApp();
+}
+async function logout() { await sb.auth.signOut(); location.reload(); }
+
+async function enterApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('adminApp').style.display = 'block';
+  document.getElementById('whoami').textContent = currentUser.email;
+
+  event = await getActiveEvent();
+  if (!event) { toast('No event found — create one in Supabase (quiz_events) first.'); return; }
+  session = await getSessionForEvent(event.id);
+
+  await loadRounds();
+  await loadTeams();
+  await loadTeamNameSlots();
+  await loadQuestionsAll();
+  await loadLifelineDefinitions();
+  renderControlPanel();
+  renderTeamSelects();
+  updateRoundModeButtons();
+  startTimerWatchdog();
+
+  sb.channel('admin-session')
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
+      (payload) => { session = payload.new; renderControlPanel(); })
+    .subscribe();
+  sb.channel('admin-teams')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_teams', filter: `event_id=eq.${event.id}` },
+      async () => { await loadTeams(); renderScoreboard(); renderTeamSelects(); renderTeamsTable(); })
+    .subscribe();
+  sb.channel('admin-buzzers')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_buzzers' },
+      () => renderBuzzerOrder())
+    .subscribe();
+  sb.channel('admin-lifelines')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_lifelines' },
+      () => renderLifelinesGrid())
+    .subscribe();
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+  document.getElementById('page-' + name).style.display = 'block';
+  if (name === 'lifelines') { renderLifelinesGrid(); loadLifelineDefinitions(); }
+  if (name === 'teams') loadRegistrationCards();
+  if (name === 'registration') loadRegistrationSettings();
+}
+
+// ---------- Rounds & Questions ----------
+let editingRoundId = null, editingQuestionId = null;
+
+async function loadRounds() {
+  const { data } = await sb.from('quiz_rounds').select('*').eq('event_id', event.id).order('round_no');
+  rounds = data || [];
+  const sel = document.getElementById('roundSelect'); sel.innerHTML = rounds.map(r => `<option value="${r.id}">R${r.round_no} — ${r.round_name}</option>`).join('');
+  const qbSel = document.getElementById('qbRound'); qbSel.innerHTML = rounds.map(r => `<option value="${r.id}">R${r.round_no} — ${r.round_name}</option>`).join('');
+  const editSel = document.getElementById('editRoundPicker');
+  editSel.innerHTML = `<option value="">— Edit existing round —</option>` + rounds.map(r => `<option value="${r.id}">R${r.round_no} — ${r.round_name}</option>`).join('');
+  sel.onchange = () => { loadQuestionsForRound(); updateRoundModeButtons(); };
+  if (rounds.length) { await loadQuestionsForRound(); updateRoundModeButtons(); }
+}
+
+function currentRound() {
+  return rounds.find(r => r.id === document.getElementById('roundSelect').value);
+}
+
+// Show/hide buzzer vs. simple-timer vs. rapid-fire controls based on the
+// SELECTED round's flags (not the question's — a round is one or the other).
+function updateRoundModeButtons() {
+  const r = currentRound();
+  const hasBuzzer = r ? r.has_buzzer : true;
+  const hasRapidFire = r ? r.has_rapid_fire : false;
+  document.getElementById('btnOpenBuzzer').style.display = hasBuzzer ? '' : 'none';
+  document.getElementById('btnStartTimer').style.display = hasBuzzer ? 'none' : '';
+  document.getElementById('buzzerOrderCard').style.display = hasBuzzer ? '' : 'none';
+  document.getElementById('rapidFireCard').style.display = hasRapidFire ? '' : 'none';
+  document.getElementById('simpleAnswerCard').style.display = (!hasBuzzer && !hasRapidFire) ? '' : 'none';
+}
+
+async function loadQuestionsForRound() {
+  const roundId = document.getElementById('roundSelect').value;
+  const { data } = await sb.from('quiz_questions').select('*').eq('round_id', roundId).order('question_no');
+  const sel = document.getElementById('questionSelect');
+  sel.innerHTML = (data||[]).map(q => `<option value="${q.id}">Q${q.question_no} — ${q.question.slice(0,40)}</option>`).join('');
+  sel.onchange = () => previewQuestion();
+  if (data && data.length) previewQuestion(data[0].id);
+}
+
+async function previewQuestion(id) {
+  const qid = id || document.getElementById('questionSelect').value;
+  const { data } = await sb.from('quiz_questions').select('*').eq('id', qid).single();
+  selectedQuestion = data;
+  if (!data) return;
+  document.getElementById('qPreview').textContent = `Q${data.question_no}: ${data.question}`;
+  document.getElementById('qPreviewOpts').innerHTML = ['a','b','c','d'].map(k =>
+    `<div class="hex-option ${data.correct_option===k.toUpperCase()?'correct':''}"><div class="tag">${k.toUpperCase()}</div>${data['option_'+k]||''}</div>`).join('');
+}
+
+async function loadQuestionsAll() {
+  const { data } = await sb.from('quiz_questions').select('*, quiz_rounds(round_no,round_name)').order('question_no');
+  questions = data || [];
+  document.getElementById('questionsTable').innerHTML = questions.map(q => `
+    <tr><td>R${q.quiz_rounds?.round_no}</td><td>${q.question_no}</td><td>${q.question.slice(0,60)}</td><td>${q.question_type}</td><td>${q.correct_option||'—'}</td><td>${q.points}</td>
+    <td><a href="#" onclick="event.preventDefault();editQuestion('${q.id}')">edit</a> ·
+        <a href="#" onclick="event.preventDefault();deleteQuestion('${q.id}')" style="color:var(--red)">delete</a></td></tr>
+  `).join('');
+}
+
+function fillRoundForm(r) {
+  document.getElementById('rRoundNo').value = r.round_no;
+  document.getElementById('rName').value = r.round_name;
+  document.getElementById('rDescription').value = r.description || '';
+  document.getElementById('rType').value = r.round_type;
+  document.getElementById('rFC').value = r.first_correct_points;
+  document.getElementById('rFW').value = r.first_wrong_points;
+  document.getElementById('rSC').value = r.second_correct_points;
+  document.getElementById('rSW').value = r.second_wrong_points;
+  document.getElementById('rWindow').value = r.buzzer_window_seconds;
+  document.getElementById('rRF').value = r.rapid_fire_points;
+  document.getElementById('rHasBuzzer').checked = r.has_buzzer;
+  document.getElementById('rHasRapidFire').checked = r.has_rapid_fire;
+}
+function loadRoundForEdit() {
+  const id = document.getElementById('editRoundPicker').value;
+  if (!id) return cancelRoundEdit();
+  editingRoundId = id;
+  fillRoundForm(rounds.find(r => r.id === id));
+  document.getElementById('roundFormTitle').textContent = 'Edit Round';
+  document.getElementById('roundSaveBtn').textContent = 'UPDATE ROUND';
+  document.getElementById('roundDeleteBtn').style.display = '';
+  document.getElementById('roundCancelBtn').style.display = '';
+}
+function cancelRoundEdit() {
+  editingRoundId = null;
+  document.getElementById('editRoundPicker').value = '';
+  document.getElementById('roundFormTitle').textContent = 'Add Round';
+  document.getElementById('roundSaveBtn').textContent = 'ADD ROUND';
+  document.getElementById('roundDeleteBtn').style.display = 'none';
+  document.getElementById('roundCancelBtn').style.display = 'none';
+  ['rRoundNo','rName','rDescription'].forEach(id => document.getElementById(id).value = '');
+}
+async function addRound() {
+  const payload = {
+    event_id: event.id,
+    round_no: +document.getElementById('rRoundNo').value,
+    round_name: document.getElementById('rName').value,
+    description: document.getElementById('rDescription').value,
+    round_type: document.getElementById('rType').value,
+    first_correct_points: +document.getElementById('rFC').value,
+    first_wrong_points: +document.getElementById('rFW').value,
+    second_correct_points: +document.getElementById('rSC').value,
+    second_wrong_points: +document.getElementById('rSW').value,
+    buzzer_window_seconds: +document.getElementById('rWindow').value,
+    rapid_fire_points: +document.getElementById('rRF').value,
+    has_buzzer: document.getElementById('rHasBuzzer').checked,
+    has_rapid_fire: document.getElementById('rHasRapidFire').checked,
+  };
+  const { error } = editingRoundId
+    ? await sb.from('quiz_rounds').update(payload).eq('id', editingRoundId)
+    : await sb.from('quiz_rounds').insert(payload);
+  if (error) return toast(error.message);
+  toast(editingRoundId ? 'Round updated' : 'Round added');
+  cancelRoundEdit();
+  await loadRounds();
+}
+async function deleteRound() {
+  if (!editingRoundId) return;
+  if (!confirm('Delete this round and ALL its questions? This cannot be undone.')) return;
+  const { error } = await sb.from('quiz_rounds').delete().eq('id', editingRoundId);
+  if (error) return toast(error.message);
+  toast('Round deleted');
+  cancelRoundEdit();
+  await loadRounds();
+  await loadQuestionsAll();
+}
+
+async function uploadQuestionImage() {
+  const fileInput = document.getElementById('qbImageFile');
+  const file = fileInput.files[0];
+  if (!file) return;
+  const statusEl = document.getElementById('qbImageUploadStatus');
+  statusEl.textContent = 'Uploading original file (no compression)…';
+
+  // NOTE: `file` is uploaded exactly as selected — no canvas re-encode, no
+  // resize step. Keep it that way or images will blur on the projector.
+  const path = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g,'_')}`;
+  const { error } = await sb.storage.from('question-images').upload(path, file, { upsert: false });
+  if (error) { statusEl.textContent = 'Upload failed: ' + error.message; return; }
+
+  const { data: pub } = sb.storage.from('question-images').getPublicUrl(path);
+  document.getElementById('qbImage').value = pub.publicUrl;
+  document.getElementById('qbImagePreview').src = pub.publicUrl;
+  document.getElementById('qbImagePreview').style.display = 'block';
+  statusEl.textContent = 'Uploaded ✓';
+}
+
+function editQuestion(id) {
+  const q = questions.find(x => x.id === id);
+  if (!q) return;
+  editingQuestionId = id;
+  document.getElementById('qbRound').value = q.round_id;
+  document.getElementById('qbNo').value = q.question_no;
+  document.getElementById('qbType').value = q.question_type;
+  document.getElementById('qbQuestion').value = q.question;
+  document.getElementById('qbA').value = q.option_a || '';
+  document.getElementById('qbB').value = q.option_b || '';
+  document.getElementById('qbC').value = q.option_c || '';
+  document.getElementById('qbD').value = q.option_d || '';
+  document.getElementById('qbCorrect').value = q.correct_option || 'A';
+  document.getElementById('qbPoints').value = q.points;
+  document.getElementById('qbTime').value = q.time_limit;
+  document.getElementById('qbImage').value = q.image_url || '';
+  document.getElementById('qbImagePreview').style.display = q.image_url ? 'block' : 'none';
+  if (q.image_url) document.getElementById('qbImagePreview').src = q.image_url;
+  document.getElementById('questionFormTitle').textContent = 'Edit Question';
+  document.getElementById('questionSaveBtn').textContent = 'UPDATE QUESTION';
+  document.getElementById('questionCancelBtn').style.display = '';
+  document.getElementById('questionFormTitle').scrollIntoView({ behavior: 'smooth' });
+}
+function cancelQuestionEdit() {
+  editingQuestionId = null;
+  ['qbNo','qbQuestion','qbA','qbB','qbC','qbD','qbImage'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('qbImagePreview').style.display = 'none';
+  document.getElementById('questionFormTitle').textContent = 'Add Question';
+  document.getElementById('questionSaveBtn').textContent = 'ADD QUESTION';
+  document.getElementById('questionCancelBtn').style.display = 'none';
+}
+async function deleteQuestion(id) {
+  if (!confirm('Delete this question?')) return;
+  const { error } = await sb.from('quiz_questions').delete().eq('id', id);
+  if (error) return toast(error.message);
+  toast('Question deleted');
+  await loadQuestionsAll(); await loadQuestionsForRound();
+}
+
+async function addQuestion() {
+  const payload = {
+    round_id: document.getElementById('qbRound').value,
+    question_no: +document.getElementById('qbNo').value,
+    question: document.getElementById('qbQuestion').value,
+    option_a: document.getElementById('qbA').value,
+    option_b: document.getElementById('qbB').value,
+    option_c: document.getElementById('qbC').value,
+    option_d: document.getElementById('qbD').value,
+    correct_option: document.getElementById('qbCorrect').value,
+    points: +document.getElementById('qbPoints').value,
+    time_limit: +document.getElementById('qbTime').value,
+    question_type: document.getElementById('qbType').value,
+    image_url: document.getElementById('qbImage').value || null,
+  };
+  const { error } = editingQuestionId
+    ? await sb.from('quiz_questions').update(payload).eq('id', editingQuestionId)
+    : await sb.from('quiz_questions').insert(payload);
+  if (error) return toast(error.message);
+  toast(editingQuestionId ? 'Question updated' : 'Question added');
+  cancelQuestionEdit();
+  await loadQuestionsAll(); await loadQuestionsForRound();
+}
+
+// ---------- Live control ----------
+function renderControlPanel() {
+  document.getElementById('stateBadge').textContent = session.state + (session.timer_paused ? ' (PAUSED)' : '');
+  document.getElementById('answeringCard').style.display = session.state === 'ANSWERING' ? 'block' : 'none';
+  if (session.state === 'ANSWERING') {
+    const t = teams.find(t => t.id === session.answering_team_id);
+    document.getElementById('answeringTeamName').textContent = t ? t.team_name : '—';
+    document.getElementById('answeringPos').textContent = session.answering_position;
+  }
+  const pauseBtn = document.getElementById('btnPauseResume');
+  const hasRunningOrPausedTimer = session.timer_paused || (session.timer_end && ['BUZZER_OPEN','AUDIENCE_POLL_OPEN','QUESTION_DISPLAY'].includes(session.state));
+  pauseBtn.style.display = hasRunningOrPausedTimer ? '' : 'none';
+  pauseBtn.textContent = session.timer_paused ? 'RESUME TIMER' : 'PAUSE TIMER';
+  renderBuzzerOrder();
+  renderScoreboard();
+}
+
+async function pushQuestion() {
+  const qid = document.getElementById('questionSelect').value;
+  if (!qid) return toast('Select a question first');
+  const { error } = await sb.rpc('push_question', { p_session_id: session.id, p_question_id: qid });
+  if (error) toast(error.message);
+}
+async function openBuzzer() { const { error } = await sb.rpc('open_buzzer', { p_session_id: session.id }); if (error) toast(error.message); }
+
+// The admin console is the one client that's reliably open and foregrounded
+// through the whole event, unlike a phone tab that can get backgrounded/
+// throttled mid-timer. This polls once a second and closes whatever timed
+// state is active once the SERVER's own timer_end has passed — it never
+// closes anything early, it's just a second, more reliable trigger for the
+// same server-side check that screen.html/team.html/audience.html already do.
+function startTimerWatchdog() {
+  setInterval(async () => {
+    if (!session.timer_end || session.timer_paused) return;
+    if (new Date(session.timer_end).getTime() > Date.now()) return;
+    if (session.state === 'BUZZER_OPEN') await sb.rpc('try_close_buzzer', { p_session_id: session.id });
+    else if (session.state === 'AUDIENCE_POLL_OPEN') await sb.rpc('try_close_audience_poll', { p_session_id: session.id });
+    else if (session.state === 'QUESTION_DISPLAY') await sb.rpc('try_close_simple_timer', { p_session_id: session.id });
+  }, 1000);
+}
+async function pauseOrResumeTimer() {
+  const fn = session.timer_paused ? 'resume_timer' : 'pause_timer';
+  const { error } = await sb.rpc(fn, { p_session_id: session.id });
+  if (error) toast(error.message);
+}
+async function startSimpleTimer() { const { error } = await sb.rpc('start_simple_timer', { p_session_id: session.id }); if (error) toast(error.message); }
+async function recordSimpleAnswer() {
+  const teamId = document.getElementById('simpleTeam').value;
+  const option = document.getElementById('simpleOption').value;
+  const { error } = await sb.rpc('record_simple_answer', { p_session_id: session.id, p_team_id: teamId, p_option: option });
+  if (error) toast(error.message);
+}
+async function endRound() {
+  const roundId = document.getElementById('roundSelect').value;
+  if (!roundId) return toast('Select a round first');
+  const r = currentRound();
+  if (!confirm(`End "${r?.round_name}" and move to the next round?`)) return;
+  const { error } = await sb.rpc('end_round_and_advance', { p_session_id: session.id, p_ending_round_id: roundId });
+  if (error) toast(error.message); else { toast('Round ended'); await loadRounds(); }
+}
+async function showRoundIntro() {
+  const roundId = document.getElementById('roundSelect').value;
+  if (!roundId) return toast('Select a round first');
+  const { error } = await sb.rpc('show_round_intro', { p_session_id: session.id, p_round_id: roundId });
+  if (error) toast(error.message);
+}
+async function showLifelinesIntro() {
+  const { error } = await sb.rpc('show_lifelines_intro', { p_session_id: session.id });
+  if (error) toast(error.message);
+}
+async function dismissIntro() {
+  const { error } = await sb.rpc('dismiss_intro', { p_session_id: session.id });
+  if (error) toast(error.message);
+}
+async function openPoll() { const { error } = await sb.rpc('open_audience_poll', { p_session_id: session.id, p_seconds: 30 }); if (error) toast(error.message); }
+async function revealResult() { const { error } = await sb.rpc('reveal_result', { p_session_id: session.id }); if (error) toast(error.message); }
+async function completeQuestion() { const { error } = await sb.rpc('complete_question', { p_session_id: session.id }); if (error) toast(error.message); }
+async function resetQuestion() {
+  if (!confirm('Reset current question? This clears buzzes/votes for it.')) return;
+  const { error } = await sb.rpc('reset_question', { p_session_id: session.id });
+  if (error) toast(error.message);
+}
+async function advanceAnswerer() { const { error } = await sb.rpc('advance_to_next_answerer', { p_session_id: session.id }); if (error) toast(error.message); }
+async function markAnswer(correct) {
+  const { error } = await sb.rpc('mark_buzzer_answer', { p_session_id: session.id, p_correct: correct });
+  if (error) toast(error.message);
+}
+
+async function renderBuzzerOrder() {
+  if (!session.current_question_id) { document.getElementById('buzzerOrderList').textContent = 'No buzzes yet.'; return; }
+  const { data } = await sb.from('quiz_buzzers').select('*, quiz_teams(team_name)').eq('question_id', session.current_question_id).order('sequence_no');
+  if (!data || !data.length) { document.getElementById('buzzerOrderList').textContent = 'No buzzes yet.'; return; }
+  document.getElementById('buzzerOrderList').innerHTML = data.map((b,i) => `
+    <div class="buzz-item"><span>${i+1}. ${b.quiz_teams?.team_name}</span><span class="pill ${b.eligible?'available':'locked'}">${b.eligible?'ELIGIBLE':'NOT ELIGIBLE'}</span></div>
+  `).join('');
+}
+
+// ---------- Teams / scores ----------
+async function loadTeams() {
+  const { data } = await sb.from('quiz_teams').select('*').eq('event_id', event.id).order('points', { ascending: false });
+  teams = data || [];
+  renderScoreboard(); renderTeamsTable();
+}
+function renderScoreboard() {
+  document.getElementById('scoreTable').innerHTML = teams.map(t => `<tr><td>${t.team_name}</td><td>${t.points}</td><td></td></tr>`).join('');
+}
+function renderTeamSelects() {
+  const opts = teams.map(t => `<option value="${t.id}">${t.team_name}</option>`).join('');
+  ['adjTeam','rfTeam','simpleTeam'].forEach(id => document.getElementById(id).innerHTML = opts);
+}
+async function adjustScore(delta) {
+  const teamId = document.getElementById('adjTeam').value;
+  const { error } = await sb.rpc('adjust_score', { p_team_id: teamId, p_delta: delta, p_reason: 'Manual adjustment' });
+  if (error) toast(error.message); else toast(`Applied ${delta>0?'+':''}${delta}`);
+}
+async function adjustScoreCustom() {
+  const v = +document.getElementById('customScoreVal').value;
+  if (!v) return;
+  await adjustScore(v);
+  document.getElementById('customScoreVal').value = '';
+}
+async function rapidFireMark(correct) {
+  const teamId = document.getElementById('rfTeam').value;
+  if (!session.current_question_id) return toast('Push a rapid-fire question first');
+  const { error } = await sb.rpc('mark_rapid_fire', { p_team_id: teamId, p_question_id: session.current_question_id, p_correct: correct });
+  if (error) toast(error.message); else toast(correct ? 'Marked correct' : 'Marked wrong');
+}
+
+async function loadTeamNameSlots() {
+  const { data } = await sb.from('quiz_team_names').select('*').eq('event_id', event.id).order('team_name');
+  document.getElementById('teamNameSlots').innerHTML = (data||[]).map(s =>
+    `<span class="pill ${s.taken?'used':'available'}" style="margin:4px;display:inline-block;">${s.team_name} ${s.taken?'(taken)':''}</span>`).join('');
+}
+async function addTeamNameSlot() {
+  const name = document.getElementById('teamNameSlot').value.trim().toUpperCase();
+  if (!name) return;
+  const { error } = await sb.from('quiz_team_names').insert({ event_id: event.id, team_name: name });
+  if (error) return toast(error.message);
+  document.getElementById('teamNameSlot').value = '';
+  await loadTeamNameSlots();
+}
+function renderTeamsTable() {
+  document.getElementById('teamsTable').innerHTML = teams.map(t => `
+    <tr><td>${t.team_name}</td><td>${t.team_code}</td><td>${t.member_count}</td><td>${t.points}</td>
+    <td>${t.device_id ? 'bound' : '—'}</td>
+    <td>${t.device_id ? `<button class="btn btn-outline" style="padding:6px 10px;font-size:12px;" onclick="releaseDevice('${t.id}')">Release device</button>` : ''}</td></tr>
+  `).join('');
+}
+async function releaseDevice(teamId) {
+  const { error } = await sb.rpc('admin_release_team_device', { p_team_id: teamId });
+  if (error) toast(error.message); else { toast('Device released'); await loadTeams(); }
+}
+
+// ---------- Registration: full-detail cards ----------
+async function loadRegistrationCards() {
+  const { data, error } = await sb.rpc('get_registrations', { p_event_id: event.id });
+  if (error) { document.getElementById('registrationCards').innerHTML = error.message; return; }
+  document.getElementById('registrationCards').innerHTML = (data||[]).map(r => `
+    <div class="card panel" style="padding:12px;font-size:12px;">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <b style="font-size:13px;">${r.team_name}</b><span class="pill available" style="font-size:10px;padding:2px 8px;">${r.team_code}</span>
+      </div>
+      <div style="color:var(--ink-dim);margin-bottom:3px;">${r.pathshala || '—'}</div>
+      <div style="margin-bottom:6px;">Captain: <b>${r.captain_name}</b> (${r.captain_age||'—'}) · ${r.phone}</div>
+      <div style="line-height:1.7;margin-bottom:8px;">
+        ${(r.members||[]).map(m => `<span class="pill" style="font-size:10px;padding:2px 8px;margin:0 3px 3px 0;display:inline-block;">${m.name} · ${m.age}</span>`).join('')}
+      </div>
+      <button class="btn btn-danger" style="padding:5px 10px;font-size:11px;" onclick="deleteRegistration('${r.team_id}','${r.team_name}')">DELETE — allow re-submit</button>
+    </div>`).join('') || '<div style="color:var(--ink-dim);">No registrations yet.</div>';
+}
+async function deleteRegistration(teamId, teamName) {
+  if (!confirm(`Delete ${teamName}'s registration? The name "${teamName}" will become available again for re-submission. This also removes their score history.`)) return;
+  const { error } = await sb.rpc('admin_delete_registration', { p_team_id: teamId });
+  if (error) return toast(error.message);
+  toast('Registration deleted — slot reopened');
+  await loadRegistrationCards();
+  await loadTeamNameSlots();
+  await loadTeams();
+}
+
+// ---------- Registration: form settings ----------
+function toLocalInputValue(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+async function loadRegistrationSettings() {
+  const { data } = await sb.from('quiz_events').select('*').eq('id', event.id).single();
+  event = data;
+  document.getElementById('setRegHeader').value = event.reg_header || '';
+  document.getElementById('setRegDescription').value = event.reg_description || '';
+  document.getElementById('setRegStart').value = toLocalInputValue(event.reg_start);
+  document.getElementById('setRegEnd').value = toLocalInputValue(event.reg_end);
+  document.getElementById('setRegClosedManually').checked = !!event.reg_closed_manually;
+
+  const { data: status } = await sb.rpc('get_registration_status', { p_event_id: event.id });
+  const s = status && status[0];
+  const pill = document.getElementById('regStatusPill');
+  pill.textContent = s ? (s.is_open ? `OPEN · ${s.slots_remaining} slots left` : `CLOSED · ${s.reason}`) : '';
+  pill.className = 'pill ' + (s && s.is_open ? 'available' : 'used');
+}
+async function saveRegistrationSettings() {
+  const start = document.getElementById('setRegStart').value;
+  const end = document.getElementById('setRegEnd').value;
+  const { error } = await sb.rpc('update_registration_settings', {
+    p_event_id: event.id,
+    p_header: document.getElementById('setRegHeader').value,
+    p_description: document.getElementById('setRegDescription').value,
+    p_start: start ? new Date(start).toISOString() : null,
+    p_end: end ? new Date(end).toISOString() : null,
+    p_closed_manually: document.getElementById('setRegClosedManually').checked,
+  });
+  if (error) return toast(error.message);
+  toast('Registration settings saved');
+  await loadRegistrationSettings();
+}
+
+// ---------- Lifelines ----------
+const LIFELINE_TYPES = ['FIFTY_FIFTY','AUDIENCE','EXPERT','TEAM_ADVICE'];
+async function loadLifelineDefinitions() {
+  const { data } = await sb.from('quiz_lifeline_definitions').select('*').eq('event_id', event.id);
+  const byType = {};
+  (data||[]).forEach(d => byType[d.lifeline_type] = d);
+
+  document.getElementById('lifelineDefsEditor').innerHTML = LIFELINE_TYPES.map(t => {
+    const d = byType[t] || {};
+    return `
+    <div class="card panel" style="padding:14px;margin-bottom:10px;" data-type="${t}">
+      <b>${t.replace('_',' ')}</b>
+      <div class="row" style="margin-top:8px;">
+        <div class="field" style="flex:1"><label>Unlock at (points)</label><input class="def-unlock" type="number" value="${d.unlock_threshold ?? 0}"></div>
+        <div class="field" style="flex:1"><label>Auto-revive at (points, optional)</label><input class="def-revive" type="number" value="${d.revive_threshold ?? ''}"></div>
+      </div>
+      <div class="field"><label>Description (shown on projector)</label><textarea class="def-desc" rows="2">${d.description || ''}</textarea></div>
+      ${d.id ? `<button class="btn btn-danger" style="padding:6px 12px;font-size:12px;" onclick="deleteLifelineDefinition('${d.id}')">DELETE</button>` : ''}
+    </div>`;
+  }).join('');
+}
+async function saveLifelineDefinitions() {
+  const cards = document.querySelectorAll('#lifelineDefsEditor [data-type]');
+  for (const card of cards) {
+    const payload = {
+      event_id: event.id,
+      lifeline_type: card.dataset.type,
+      unlock_threshold: +card.querySelector('.def-unlock').value || 0,
+      revive_threshold: card.querySelector('.def-revive').value ? +card.querySelector('.def-revive').value : null,
+      description: card.querySelector('.def-desc').value,
+    };
+    const { error } = await sb.from('quiz_lifeline_definitions').upsert(payload, { onConflict: 'event_id,lifeline_type' });
+    if (error) return toast(error.message);
+  }
+  toast('Lifeline definitions saved');
+  await loadLifelineDefinitions();
+}
+async function deleteLifelineDefinition(id) {
+  if (!confirm('Delete this lifeline definition? Teams will no longer auto-unlock it.')) return;
+  const { error } = await sb.from('quiz_lifeline_definitions').delete().eq('id', id);
+  if (error) return toast(error.message);
+  await loadLifelineDefinitions();
+}
+async function renderLifelinesGrid() {
+  const { data } = await sb.from('quiz_lifelines').select('*, quiz_teams(team_name)').order('team_id');
+  const byTeam = {};
+  (data||[]).forEach(l => { (byTeam[l.quiz_teams?.team_name || 'Unknown'] ||= []).push(l); });
+  document.getElementById('lifelinesGrid').innerHTML = Object.entries(byTeam).map(([name, ls]) => `
+    <div class="card panel" style="padding:14px;">
+      <b>${name}</b>
+      <div class="row" style="margin-top:8px;">
+        ${ls.map(l => `<span class="pill ${l.status.toLowerCase()}">${l.lifeline_type.replace('_',' ')}: ${l.status}
+          ${l.status==='AVAILABLE'?`<a href="#" onclick="event.preventDefault();useLifeline('${l.team_id}','${l.lifeline_type}')" style="margin-left:6px;">use</a>`:''}
+          ${l.status==='USED'?`<a href="#" onclick="event.preventDefault();reviveLifeline('${l.team_id}','${l.lifeline_type}')" style="margin-left:6px;">revive</a>`:''}
+        </span>`).join(' ')}
+      </div>
+    </div>`).join('') || 'No lifelines unlocked yet.';
+}
+async function useLifeline(teamId, type) {
+  const { error } = await sb.rpc('use_lifeline', { p_team_id: teamId, p_type: type });
+  if (error) toast(error.message); else renderLifelinesGrid();
+}
+async function reviveLifeline(teamId, type) {
+  const { error } = await sb.rpc('revive_lifeline', { p_team_id: teamId, p_type: type });
+  if (error) toast(error.message); else renderLifelinesGrid();
+}
+</script>
+</body>
+</html>
