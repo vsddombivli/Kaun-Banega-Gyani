@@ -20,9 +20,10 @@ declare
 begin
   if not public.is_admin() then raise exception 'Admin only'; end if;
 
-  select r.*, q.time_limit into v_round, v_time_limit
+  select r.* into v_round
     from public.quiz_questions q join public.quiz_rounds r on r.id = q.round_id
     where q.id = p_question_id;
+  select time_limit into v_time_limit from public.quiz_questions where id = p_question_id;
 
   update public.quiz_session
     set current_question_id = p_question_id,
