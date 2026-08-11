@@ -22,67 +22,125 @@
   .resultbar{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
   .resultbar .track{flex:1;height:22px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;}
   .resultbar .fill{height:100%;background:linear-gradient(90deg,var(--purple),var(--gold));border-radius:999px;transition:width .6s ease;}
+  .field{margin-bottom:14px;text-align:left;}
+  label{font-size:12px;color:var(--ink-dim);display:block;margin-bottom:5px;}
+  .urgent-banner{background:rgba(226,73,90,.15);border:1px solid var(--red);border-radius:10px;padding:10px;margin-bottom:14px;font-weight:700;color:var(--red);text-align:center;}
 </style>
 </head>
 <body>
 <div class="wrap" id="app">
   <img src="shared/logo.png" alt="logo" style="height:44px;width:auto;align-self:flex-start;margin-bottom:14px;">
-  <div class="panel pop-in" style="padding:26px;" id="card">
+
+  <div class="panel pop-in" style="padding:26px;" id="registerCard">
     <div class="eyebrow center">VSD Quiz · Audience Poll</div>
-    <div class="chakra" style="margin:24px auto;"></div>
-    <div class="status-line center">Waiting for the next poll question…</div>
+    <h1 style="text-align:center;font-size:22px;margin:10px 0 18px;">Join the Poll</h1>
+    <div class="field"><label>Your Name</label><input id="regName"></div>
+    <div class="field"><label>Mobile Number</label><input id="regPhone" type="tel"></div>
+    <div style="font-size:12px;color:var(--ink-dim);margin-bottom:14px;">Your mobile number keeps your answers tied to you — needed so we can identify top scorers for prizes at the end.</div>
+    <button class="btn btn-gold" style="width:100%" onclick="registerAudience()">JOIN</button>
+    <div id="regError" style="color:var(--red);margin-top:10px;font-size:14px;"></div>
   </div>
+
+  <div class="panel pop-in" style="padding:26px;display:none;" id="card"></div>
 </div>
 
 <script src="shared/supabase-client.js"></script>
 <script>
-let session = null, question = null, voted = false;
-const deviceId = getDeviceId(); // used as anonymous audience session id
+let session = null, question = null, participant = null, event = null, voted = false;
+const deviceId = getDeviceId();
 
 window.addEventListener('DOMContentLoaded', boot);
 
 async function boot() {
-  const event = await getActiveEvent();
+  event = await getActiveEvent();
   session = await getSessionForEvent(event.id);
-  await render();
+
+  const saved = localStorage.getItem('vsd_audience_participant_' + event.id);
+  if (saved) {
+    participant = JSON.parse(saved);
+    enterPollView();
+  }
+
   sb.channel('audience-session-' + session.event_id)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
-      async (payload) => { session = payload.new; voted = false; await render(); })
+      async (payload) => {
+        const questionChanged = payload.new.current_question_id !== session.current_question_id;
+        session = payload.new;
+        if (questionChanged) voted = false;
+        if (participant) await render();
+      })
     .subscribe();
+}
+
+async function registerAudience() {
+  const err = document.getElementById('regError');
+  err.textContent = '';
+  const name = document.getElementById('regName').value.trim();
+  const phone = document.getElementById('regPhone').value.trim();
+  if (!name || !phone) { err.textContent = 'Both name and mobile number are required.'; return; }
+
+  const { data, error } = await sb.rpc('register_or_join_audience', {
+    p_event_id: event.id, p_name: name, p_phone: phone, p_device_id: deviceId
+  });
+  if (error) { err.textContent = error.message; return; }
+
+  participant = data;
+  localStorage.setItem('vsd_audience_participant_' + event.id, JSON.stringify(participant));
+  enterPollView();
+}
+
+function enterPollView() {
+  document.getElementById('registerCard').style.display = 'none';
+  document.getElementById('card').style.display = 'block';
+  render();
 }
 
 async function render() {
   const card = document.getElementById('card');
 
   if (!session.current_question_id) {
-    card.innerHTML = waitingHtml('Waiting for the next poll question…');
+    card.innerHTML = waitingHtml(`Welcome, ${participant.name}! Waiting for the next question…`);
     return;
   }
 
   if (!question || question.id !== session.current_question_id) {
     const { data } = await sb.from('quiz_questions_public').select('*').eq('id', session.current_question_id).single();
     question = data;
-    const { data: existing } = await sb.from('quiz_audience_votes').select('id').eq('question_id', question.id).eq('session_id', deviceId);
+    const { data: existing } = await sb.from('quiz_audience_votes').select('id').eq('question_id', question.id).eq('participant_id', participant.id);
     voted = existing && existing.length > 0;
   }
 
-  if (session.state === 'AUDIENCE_POLL_OPEN' && !voted) {
+  // Voting closed once the answer is revealed / question wrapped up
+  if (['RESULT_REVEAL','QUESTION_COMPLETE'].includes(session.state) && !(session.lifeline_kind === 'AUDIENCE' && session.lifeline_active)) {
+    if (session.last_result?.kind === 'AUDIENCE_POLL') {
+      card.innerHTML = resultsHtml(session.last_result.results || []);
+    } else {
+      card.innerHTML = waitingHtml('Question complete. Get ready for the next one.');
+    }
+    return;
+  }
+
+  // Lifeline-triggered final call — pauses main flow, gives stragglers 15s
+  if (session.lifeline_kind === 'AUDIENCE' && session.lifeline_active) {
+    if (session.lifeline_poll_results) {
+      card.innerHTML = resultsHtml(session.lifeline_poll_results);
+      return;
+    }
+    if (!voted) {
+      card.innerHTML = urgentPollHtml();
+      tickAudienceTimer();
+      return;
+    }
+    card.innerHTML = waitingHtml('✓ Your answer is already in — a team is using their Audience Poll lifeline.');
+    return;
+  }
+
+  // Default: question is live, continuous background voting
+  if (!voted) {
     card.innerHTML = pollHtml();
-    tickAudienceTimer();
     return;
   }
-
-  if (session.state === 'AUDIENCE_POLL_OPEN' && voted) {
-    card.innerHTML = waitingHtml('✓ Your answer has been recorded.<br>Please wait for the result.');
-    return;
-  }
-
-  if (session.state === 'RESULT_REVEAL' && session.last_result?.kind === 'AUDIENCE_POLL') {
-    card.innerHTML = resultsHtml(session.last_result.results || []);
-    return;
-  }
-
-  card.innerHTML = waitingHtml('Standby for the next poll question…');
+  card.innerHTML = waitingHtml('✓ Answer recorded. Waiting for the result…');
 }
 
 function waitingHtml(msg) {
@@ -96,7 +154,21 @@ function pollHtml() {
   return `
   <div class="eyebrow center">Question ${q.question_no}</div>
   <div class="qtext">${q.question}</div>
-  <div class="center" style="margin-bottom:14px;"><span class="timer-ring" id="audTimer">${secondsRemaining(session.timer_end)}</span></div>
+  <div class="opts">
+    <div class="hex-option" onclick="vote('A')"><div class="tag">A</div>${q.option_a||''}</div>
+    <div class="hex-option" onclick="vote('B')"><div class="tag">B</div>${q.option_b||''}</div>
+    <div class="hex-option" onclick="vote('C')"><div class="tag">C</div>${q.option_c||''}</div>
+    <div class="hex-option" onclick="vote('D')"><div class="tag">D</div>${q.option_d||''}</div>
+  </div>`;
+}
+
+function urgentPollHtml() {
+  const q = question;
+  return `
+  <div class="urgent-banner">A team is using Audience Poll — vote now!</div>
+  <div class="eyebrow center">Question ${q.question_no}</div>
+  <div class="qtext">${q.question}</div>
+  <div class="center" style="margin-bottom:14px;"><span class="timer-ring urgent" id="audTimer">${secondsRemaining(session.lifeline_timer_end)}</span></div>
   <div class="opts">
     <div class="hex-option" onclick="vote('A')"><div class="tag">A</div>${q.option_a||''}</div>
     <div class="hex-option" onclick="vote('B')"><div class="tag">B</div>${q.option_b||''}</div>
@@ -106,7 +178,6 @@ function pollHtml() {
 }
 
 function resultsHtml(rows) {
-  const labels = { A: question.option_a, B: question.option_b, C: question.option_c, D: question.option_d };
   return `<div class="eyebrow center">Live Result</div>
   <div class="qtext">${question.question}</div>
   ${rows.map(r => `
@@ -121,23 +192,20 @@ let timerInterval = null;
 function tickAudienceTimer() {
   clearInterval(timerInterval);
   timerInterval = setInterval(async () => {
-    if (session.timer_paused) {
-      const el = document.getElementById('audTimer');
-      if (el) el.textContent = session.timer_remaining_seconds ?? 0;
-      return;
-    }
-    const secs = secondsRemaining(session.timer_end);
+    const secs = secondsRemaining(session.lifeline_timer_end);
     const el = document.getElementById('audTimer');
     if (el) el.textContent = secs;
     if (secs <= 0) {
       clearInterval(timerInterval);
-      await sb.rpc('try_close_audience_poll', { p_session_id: session.id });
+      await sb.rpc('try_close_lifeline_subtimer', { p_session_id: session.id });
     }
   }, 300);
 }
 
 async function vote(option) {
-  const { error } = await sb.rpc('submit_vote', { p_session_id: session.id, p_session_device_id: deviceId, p_option: option });
+  const { error } = await sb.rpc('submit_vote', {
+    p_session_id: session.id, p_participant_id: participant.id, p_question_id: question.id, p_option: option
+  });
   if (error) { toast(error.message); return; }
   voted = true;
   await render();

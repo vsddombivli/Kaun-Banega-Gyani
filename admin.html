@@ -64,6 +64,7 @@
     <div class="tab" data-tab="teams" onclick="showTab('teams')">Teams</div>
     <div class="tab" data-tab="registration" onclick="showTab('registration')">Registration</div>
     <div class="tab" data-tab="lifelines" onclick="showTab('lifelines')">Lifelines</div>
+    <div class="tab" data-tab="audience" onclick="showTab('audience')">Audience</div>
   </div>
 
   <div class="page" id="page-control">
@@ -113,12 +114,28 @@
           <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">Then click REVEAL ANSWER above to grade it and turn it green/red on screen.</div>
         </div>
 
+        <div class="card panel" id="lifelineCard" style="display:none;">
+          <h3 style="margin-bottom:10px;">Activate Lifeline (simple rounds only, one per team per question)</h3>
+          <div class="row">
+            <select id="lifelineTeam"></select>
+            <button class="btn btn-gold" onclick="requestLifeline('FIFTY_FIFTY')">50-50</button>
+            <button class="btn btn-gold" onclick="requestLifeline('AUDIENCE')">AUDIENCE POLL</button>
+            <button class="btn btn-gold" onclick="requestLifeline('EXPERT')">EXPERT ADVICE</button>
+            <button class="btn btn-gold" onclick="requestLifeline('TEAM_ADVICE')">TEAM ADVICE</button>
+          </div>
+          <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">Pauses the timer automatically. Click RESUME TIMER above when the team is ready to continue.</div>
+        </div>
+
+        <div class="card panel" id="buzzInClosedCard" style="display:none;">
+          <h3 style="margin-bottom:10px;">First buzz: <span id="firstBuzzTeamName"></span></h3>
+          <button class="btn btn-gold" onclick="startAnswerTimer()">START ANSWER TIMER</button>
+        </div>
+
         <div class="card panel" id="answeringCard" style="display:none;">
-          <h3 style="margin-bottom:10px;">Currently Answering: <span id="answeringTeamName"></span> (position <span id="answeringPos"></span>)</h3>
+          <h3 style="margin-bottom:10px;">Currently Answering: <span id="answeringTeamName"></span></h3>
           <div class="row">
             <button class="btn btn-gold" onclick="markAnswer(true)">CORRECT</button>
-            <button class="btn btn-danger" onclick="markAnswer(false)">WRONG</button>
-            <button class="btn btn-outline" onclick="advanceAnswerer()">ADVANCE TO NEXT ELIGIBLE TEAM</button>
+            <button class="btn btn-danger" onclick="markAnswer(false)">WRONG (no passing)</button>
           </div>
         </div>
 
@@ -183,7 +200,8 @@
           <div class="field" style="flex:1"><label>2nd wrong</label><input id="rSW" type="number" value="-100"></div>
         </div>
         <div class="row">
-          <div class="field" style="flex:1"><label>Buzzer window (sec)</label><input id="rWindow" type="number" value="30"></div>
+          <div class="field" style="flex:1"><label>Buzz-in window (sec)</label><input id="rWindow" type="number" value="15"></div>
+          <div class="field" style="flex:1"><label>Answer window (sec)</label><input id="rAnswerWindow" type="number" value="30"></div>
           <div class="field" style="flex:1"><label>Rapid fire points</label><input id="rRF" type="number" value="100"></div>
         </div>
         <div class="row" style="margin-bottom:14px;">
@@ -281,10 +299,20 @@
       <div id="lifelineDefsEditor"></div>
       <button class="btn btn-gold" style="margin-top:10px;" onclick="saveLifelineDefinitions()">SAVE ALL</button>
     </div>
-    </div>
     <div class="card panel">
       <h3 style="margin-bottom:14px;">Team Lifeline Status</h3>
       <div id="lifelinesGrid"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-audience" style="display:none;">
+    <div class="card panel">
+      <div class="row" style="justify-content:space-between;">
+        <h3 style="margin-bottom:14px;">Audience Leaderboard</h3>
+        <button class="btn btn-outline" onclick="loadAudienceLeaderboard()">REFRESH</button>
+      </div>
+      <div style="font-size:12px;color:var(--ink-dim);margin-bottom:14px;">Correct answers out of total questions answered, across every question type. Use this to pick your top 5–10 winners — ties or edge cases are yours to judge.</div>
+      <table><thead><tr><th>#</th><th>Name</th><th>Mobile</th><th>Correct</th><th>Answered</th></tr></thead><tbody id="audienceLeaderboardTable"></tbody></table>
     </div>
   </div>
 </div>
@@ -352,6 +380,16 @@ function showTab(name) {
   if (name === 'lifelines') { renderLifelinesGrid(); loadLifelineDefinitions(); }
   if (name === 'teams') loadRegistrationCards();
   if (name === 'registration') loadRegistrationSettings();
+  if (name === 'audience') loadAudienceLeaderboard();
+}
+
+async function loadAudienceLeaderboard() {
+  const { data, error } = await sb.rpc('get_audience_leaderboard', { p_event_id: event.id });
+  const tbody = document.getElementById('audienceLeaderboardTable');
+  if (error) { tbody.innerHTML = `<tr><td colspan="5">${error.message}</td></tr>`; return; }
+  tbody.innerHTML = (data||[]).map((r,i) => `
+    <tr><td>${i+1}</td><td>${r.name}</td><td>${r.phone}</td><td>${r.correct_count}</td><td>${r.total_answered}</td></tr>
+  `).join('') || '<tr><td colspan="5">No audience answers recorded yet.</td></tr>';
 }
 
 // ---------- Rounds & Questions ----------
@@ -383,6 +421,7 @@ function updateRoundModeButtons() {
   document.getElementById('buzzerOrderCard').style.display = hasBuzzer ? '' : 'none';
   document.getElementById('rapidFireCard').style.display = hasRapidFire ? '' : 'none';
   document.getElementById('simpleAnswerCard').style.display = (!hasBuzzer && !hasRapidFire) ? '' : 'none';
+  document.getElementById('lifelineCard').style.display = (!hasBuzzer && !hasRapidFire) ? '' : 'none';
 }
 
 async function loadQuestionsForRound() {
@@ -424,6 +463,7 @@ function fillRoundForm(r) {
   document.getElementById('rSC').value = r.second_correct_points;
   document.getElementById('rSW').value = r.second_wrong_points;
   document.getElementById('rWindow').value = r.buzzer_window_seconds;
+  document.getElementById('rAnswerWindow').value = r.answer_window_seconds;
   document.getElementById('rRF').value = r.rapid_fire_points;
   document.getElementById('rHasBuzzer').checked = r.has_buzzer;
   document.getElementById('rHasRapidFire').checked = r.has_rapid_fire;
@@ -459,6 +499,7 @@ async function addRound() {
     second_correct_points: +document.getElementById('rSC').value,
     second_wrong_points: +document.getElementById('rSW').value,
     buzzer_window_seconds: +document.getElementById('rWindow').value,
+    answer_window_seconds: +document.getElementById('rAnswerWindow').value,
     rapid_fire_points: +document.getElementById('rRF').value,
     has_buzzer: document.getElementById('rHasBuzzer').checked,
     has_rapid_fire: document.getElementById('rHasRapidFire').checked,
@@ -572,14 +613,19 @@ function renderControlPanel() {
   if (session.state === 'ANSWERING') {
     const t = teams.find(t => t.id === session.answering_team_id);
     document.getElementById('answeringTeamName').textContent = t ? t.team_name : '—';
-    document.getElementById('answeringPos').textContent = session.answering_position;
   }
+  document.getElementById('buzzInClosedCard').style.display = session.state === 'BUZZER_CLOSED' ? 'block' : 'none';
+  if (session.state === 'BUZZER_CLOSED') updateFirstBuzzName();
   const pauseBtn = document.getElementById('btnPauseResume');
   const hasRunningOrPausedTimer = session.timer_paused || (session.timer_end && ['BUZZER_OPEN','AUDIENCE_POLL_OPEN','QUESTION_DISPLAY'].includes(session.state));
   pauseBtn.style.display = hasRunningOrPausedTimer ? '' : 'none';
   pauseBtn.textContent = session.timer_paused ? 'RESUME TIMER' : 'PAUSE TIMER';
   renderBuzzerOrder();
   renderScoreboard();
+}
+async function updateFirstBuzzName() {
+  const { data } = await sb.from('quiz_buzzers').select('*, quiz_teams(team_name)').eq('question_id', session.current_question_id).order('sequence_no').limit(1);
+  document.getElementById('firstBuzzTeamName').textContent = data && data[0] ? data[0].quiz_teams.team_name : '—';
 }
 
 async function pushQuestion() {
@@ -598,6 +644,10 @@ async function openBuzzer() { const { error } = await sb.rpc('open_buzzer', { p_
 // same server-side check that screen.html/team.html/audience.html already do.
 function startTimerWatchdog() {
   setInterval(async () => {
+    if (session.lifeline_active && session.lifeline_timer_end
+        && new Date(session.lifeline_timer_end).getTime() <= Date.now()) {
+      await sb.rpc('try_close_lifeline_subtimer', { p_session_id: session.id });
+    }
     if (!session.timer_end || session.timer_paused) return;
     if (new Date(session.timer_end).getTime() > Date.now()) return;
     if (session.state === 'BUZZER_OPEN') await sb.rpc('try_close_buzzer', { p_session_id: session.id });
@@ -647,7 +697,12 @@ async function resetQuestion() {
   const { error } = await sb.rpc('reset_question', { p_session_id: session.id });
   if (error) toast(error.message);
 }
-async function advanceAnswerer() { const { error } = await sb.rpc('advance_to_next_answerer', { p_session_id: session.id }); if (error) toast(error.message); }
+async function startAnswerTimer() { const { error } = await sb.rpc('start_answer_timer', { p_session_id: session.id }); if (error) toast(error.message); }
+async function requestLifeline(type) {
+  const teamId = document.getElementById('lifelineTeam').value;
+  const { error } = await sb.rpc('request_lifeline', { p_session_id: session.id, p_team_id: teamId, p_lifeline_type: type });
+  if (error) toast(error.message); else toast(`${type.replace('_',' ')} activated — timer paused`);
+}
 async function markAnswer(correct) {
   const { error } = await sb.rpc('mark_buzzer_answer', { p_session_id: session.id, p_correct: correct });
   if (error) toast(error.message);
@@ -673,7 +728,7 @@ function renderScoreboard() {
 }
 function renderTeamSelects() {
   const opts = teams.map(t => `<option value="${t.id}">${t.team_name}</option>`).join('');
-  ['adjTeam','rfTeam','simpleTeam'].forEach(id => document.getElementById(id).innerHTML = opts);
+  ['adjTeam','rfTeam','simpleTeam','lifelineTeam'].forEach(id => document.getElementById(id).innerHTML = opts);
 }
 async function adjustScore(delta) {
   const teamId = document.getElementById('adjTeam').value;

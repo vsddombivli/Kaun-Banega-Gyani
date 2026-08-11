@@ -176,14 +176,12 @@ async function render() {
     return;
   }
 
-  if (['BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) {
+  if (['BUZZER_CLOSED','ANSWERING'].includes(session.state)) {
     content.className = 'center';
     const mine = await myBuzzPosition();
     let line = 'Buzzer closed.';
-    if (mine === 1) line = session.answering_team_id === team.id ? "You buzzed first — your team is answering!" : "You buzzed first — waiting on your call.";
-    else if (mine === 2) line = session.answering_team_id === team.id ? "You buzzed second — your turn now!" : "You buzzed second — waiting for first team.";
+    if (mine === 1) line = session.answering_team_id === team.id ? "You buzzed first — your team is answering now!" : "You buzzed first — waiting for the answer timer to start.";
     else if (mine === 0) line = "Buzzer closed. You didn't buzz in time.";
-    else if (mine === null) line = "Buzzer closed. Another team wasn't eligible this round.";
     content.innerHTML = `<div class="chakra"></div><div class="status-line">${line}</div>`;
     return;
   }

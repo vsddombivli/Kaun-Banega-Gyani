@@ -15,6 +15,8 @@
 </script>
 <style>
   body{overflow:hidden;}
+  .sound-unlock{position:fixed;inset:0;background:rgba(5,4,16,.92);display:flex;align-items:center;justify-content:center;z-index:999;cursor:pointer;flex-direction:column;gap:16px;}
+  .sound-unlock .btn-gold{padding:18px 34px;font-size:18px;}
   .stage{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;position:relative;}
   .logo-badge{position:absolute;top:28px;left:50%;transform:translateX(-50%);text-align:center;}
   .logo-badge .title{font-family:'Cinzel Decorative',serif;font-size:26px;color:var(--gold-bright);text-shadow:0 0 20px rgba(232,189,92,.5);}
@@ -68,6 +70,12 @@
 </style>
 </head>
 <body>
+<div class="sound-unlock" id="soundUnlock" onclick="enableSound()">
+  <div class="chakra"></div>
+  <div style="font-family:'Cinzel',serif;color:var(--gold-bright);font-size:22px;">Tap anywhere to enable sound</div>
+  <div style="color:var(--ink-dim);font-size:14px;">Required once by the browser before this screen can play audio cues</div>
+</div>
+
 <div class="stage" id="stage">
   <img src="shared/logo.png" alt="logo" style="position:absolute;top:20px;left:36px;height:70px;">
   <div class="logo-badge"><div class="title">KAUN BANEGA GYANI</div><div class="sub">VSD PRABHU POOJA &amp; GURU VANDAN QUIZ</div></div>
@@ -81,28 +89,94 @@
 <script>
 let session = null, question = null, teams = [];
 
+// ---------- Sound cues ----------
+// Drop your downloaded clips into shared/audio/ with these exact names.
+// Missing files fail silently (404 -> caught, no sound, no error shown) so
+// you can add them incrementally. Keep stings short (1-3s).
+const SOUNDS = {
+  questionIn: new Audio('shared/audio/question-in.mp3'),
+  buzzerOpen: new Audio('shared/audio/buzzer-open.mp3'),
+  buzzIn:     new Audio('shared/audio/buzz-in.mp3'),
+  correct:    new Audio('shared/audio/correct.mp3'),
+  wrong:      new Audio('shared/audio/wrong.mp3'),
+  lifeline:   new Audio('shared/audio/lifeline.mp3'),
+  tick:       new Audio('shared/audio/tick.mp3'),
+  roundEnd:   new Audio('shared/audio/round-end.mp3'),
+};
+let soundEnabled = false;
+function playSound(key) {
+  if (!soundEnabled) return;
+  const a = SOUNDS[key];
+  if (!a) return;
+  a.currentTime = 0;
+  a.play().catch(() => {}); // ignore missing-file / blocked errors
+}
+function enableSound() {
+  soundEnabled = true;
+  // Play-then-immediately-pause each clip once, inside this click handler,
+  // so the browser counts it as a user gesture and allows later autoplay.
+  Object.values(SOUNDS).forEach(a => { a.play().then(() => a.pause()).catch(() => {}); a.currentTime = 0; });
+  document.getElementById('soundUnlock').style.display = 'none';
+}
+
+// Transition-tracking so sounds fire once per real change, not on every re-render
+let lastAnnouncedQuestionId = null, lastState = null, lastLifelineActive = false, lastIntroKind = null;
+
 window.addEventListener('DOMContentLoaded', boot);
 
 async function boot() {
   const event = await getActiveEvent();
   session = await getSessionForEvent(event.id);
+  lastAnnouncedQuestionId = session.current_question_id;
+  lastState = session.state;
+  lastLifelineActive = session.lifeline_active;
   await loadTeams(event.id);
   await render();
 
   sb.channel('screen-session-' + session.event_id)
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'quiz_session', filter: `id=eq.${session.id}` },
-      async (payload) => { session = payload.new; await render(); })
+      async (payload) => { session = payload.new; await handleSoundTriggers(); await render(); })
     .subscribe();
 
   sb.channel('screen-teams-' + event.id)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_teams', filter: `event_id=eq.${event.id}` },
-      async () => { await loadTeams(event.id); if (['QUESTION_DISPLAY','BUZZER_OPEN','BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) renderSidebars(); })
+      async () => { await loadTeams(event.id); if (['QUESTION_DISPLAY','BUZZER_OPEN','BUZZER_CLOSED','ANSWERING'].includes(session.state)) renderSidebars(); })
     .subscribe();
 
   sb.channel('screen-buzzers')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'quiz_buzzers' },
-      async () => { if (session.current_question_id) renderSidebars(); })
+      async (payload) => {
+        if (payload.eventType === 'INSERT' && payload.new.sequence_no === 1) playSound('buzzIn');
+        if (session.current_question_id) renderSidebars();
+      })
     .subscribe();
+}
+
+// Compares the freshly-arrived session to what we last saw and fires the
+// matching cue exactly once per real transition.
+async function handleSoundTriggers() {
+  if (session.state === 'QUESTION_DISPLAY' && session.current_question_id !== lastAnnouncedQuestionId) {
+    playSound('questionIn');
+  }
+  if (session.state === 'BUZZER_OPEN' && lastState !== 'BUZZER_OPEN') {
+    playSound('buzzerOpen');
+  }
+  if (session.state === 'RESULT_REVEAL' && lastState !== 'RESULT_REVEAL') {
+    const correct = session.last_result?.correct;
+    if (correct === true) playSound('correct');
+    else if (correct === false) playSound('wrong');
+  }
+  if (session.lifeline_active && !lastLifelineActive) {
+    playSound('lifeline');
+  }
+  if (session.state === 'INTRO_CARD' && session.intro_content?.kind === 'ROUND_TRANSITION' && lastIntroKind !== 'ROUND_TRANSITION') {
+    playSound('roundEnd');
+  }
+
+  lastAnnouncedQuestionId = session.current_question_id;
+  lastState = session.state;
+  lastLifelineActive = session.lifeline_active;
+  lastIntroKind = session.state === 'INTRO_CARD' ? session.intro_content?.kind : null;
 }
 
 async function loadTeams(eventId) {
@@ -113,6 +187,7 @@ async function loadTeams(eventId) {
 async function render() {
   const content = document.getElementById('content');
   clearOverlays();
+  if (session.lifeline_active) renderLifelinePanel();
 
   if (!session.current_question_id) {
     content.innerHTML = `<div class="chakra"></div><div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Get ready — the quiz is about to begin</div>`;
@@ -135,19 +210,10 @@ async function render() {
     return;
   }
 
-  if (['BUZZER_OPEN','BUZZER_CLOSED','ANSWERING','PASSING'].includes(session.state)) {
+  if (['BUZZER_OPEN','BUZZER_CLOSED','ANSWERING'].includes(session.state)) {
     content.innerHTML = questionHtml();
     renderTimer('try_close_buzzer');
     await renderSidebars();
-    if (session.state === 'PASSING') {
-      const r = session.last_result;
-      const team = teams.find(t => t.id === r?.team_id);
-      const banner = document.createElement('div');
-      banner.className = 'pop-in result-overlay';
-      banner.style = 'position:absolute;bottom:60px;background:rgba(10,8,32,.9);padding:16px 32px;border-radius:14px;border:1px solid var(--red);';
-      banner.innerHTML = `<span style="color:var(--red);font-weight:800;font-size:22px;">${team?team.team_name:''} WRONG ${r?.points} — PASSING TO NEXT TEAM</span>`;
-      document.getElementById('stage').appendChild(banner);
-    }
     return;
   }
 
@@ -235,13 +301,63 @@ function introCardHtml(intro) {
   return `<div class="chakra"></div>`;
 }
 
+function renderLifelinePanel() {
+  const team = teams.find(t => t.id === session.lifeline_team_id);
+  const panel = document.createElement('div');
+  panel.className = 'lifeline-panel pop-in';
+  panel.style = 'position:absolute;bottom:40px;left:50%;transform:translateX(-50%);background:rgba(10,8,32,.95);border:1px solid var(--gold);border-radius:16px;padding:20px 28px;max-width:640px;width:90%;text-align:center;';
+
+  const label = { FIFTY_FIFTY: '50-50', AUDIENCE: 'Audience Poll', EXPERT: 'Expert Advice', TEAM_ADVICE: 'Team Advice' }[session.lifeline_kind] || session.lifeline_kind;
+  let body = `<div style="font-family:'Cinzel',serif;color:var(--gold-bright);font-size:20px;margin-bottom:8px;">${team?team.team_name:''} — ${label}</div>`;
+
+  if (session.lifeline_kind === 'FIFTY_FIFTY') {
+    body += `<div style="color:var(--ink-dim);">Two wrong options removed above.</div>`;
+  } else if (session.lifeline_kind === 'AUDIENCE') {
+    if (session.lifeline_poll_results) {
+      body += (session.lifeline_poll_results || []).map(r => `
+        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+          <div style="width:26px;font-weight:800;">${r.option}</div>
+          <div style="flex:1;height:16px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;">
+            <div style="height:100%;width:${r.pct}%;background:linear-gradient(90deg,var(--purple),var(--gold));"></div>
+          </div>
+          <div style="width:50px;text-align:right;">${r.pct}%</div>
+        </div>`).join('');
+    } else {
+      body += `<div style="color:var(--ink-dim);margin-bottom:6px;">Audience is voting…</div><div class="timer-ring" id="lifelineTimer" style="margin:0 auto;width:70px;height:70px;font-size:22px;"></div>`;
+    }
+  } else {
+    body += session.lifeline_timer_end
+      ? `<div style="color:var(--ink-dim);margin-bottom:6px;">Consulting…</div><div class="timer-ring" id="lifelineTimer" style="margin:0 auto;width:70px;height:70px;font-size:22px;"></div>`
+      : `<div style="color:var(--ink-dim);">Time's up — resuming shortly.</div>`;
+  }
+
+  panel.innerHTML = body;
+  document.getElementById('stage').appendChild(panel);
+
+  if (session.lifeline_timer_end) {
+    clearInterval(window._lifelineTimerInt);
+    window._lifelineTimerInt = setInterval(async () => {
+      const secs = secondsRemaining(session.lifeline_timer_end);
+      const el = document.getElementById('lifelineTimer');
+      if (el) el.textContent = secs;
+      if (secs <= 0) {
+        clearInterval(window._lifelineTimerInt);
+        await sb.rpc('try_close_lifeline_subtimer', { p_session_id: session.id });
+      }
+    }, 300);
+  }
+}
+
 function clearOverlays() {
-  document.querySelectorAll('.buzzer-order, .scoreboard, .timer-big, .stage > .pop-in.result-overlay').forEach(el => el.remove());
+  document.querySelectorAll('.buzzer-order, .scoreboard, .timer-big, .lifeline-panel, .stage > .pop-in.result-overlay').forEach(el => el.remove());
+  clearInterval(window._lifelineTimerInt);
 }
 
 function questionHtml(selectedOption, correctOption) {
   const q = question;
+  const eliminated = session.eliminated_options || [];
   const cls = (letter) => {
+    if (eliminated.includes(letter)) return 'eliminated';
     if (correctOption) return letter === correctOption ? 'correct' : (letter === selectedOption ? 'wrong' : '');
     if (selectedOption) return letter === selectedOption ? 'selected' : '';
     return '';
@@ -293,6 +409,7 @@ function renderTimer(closeRpcName) {
   t.innerHTML = `<div class="timer-ring" id="screenTimer">${initial}</div>`;
   document.getElementById('stage').appendChild(t);
   clearInterval(window._timerInt);
+  let lastTickedSecond = null;
   window._timerInt = setInterval(async () => {
     if (session.timer_paused) {
       const el = document.getElementById('screenTimer');
@@ -303,6 +420,7 @@ function renderTimer(closeRpcName) {
     const el = document.getElementById('screenTimer');
     if (el) { el.textContent = secs; el.className = 'timer-ring ' + (secs<=5?'urgent':''); }
     else clearInterval(window._timerInt);
+    if (secs <= 5 && secs > 0 && secs !== lastTickedSecond) { lastTickedSecond = secs; playSound('tick'); }
     if (secs <= 0) {
       clearInterval(window._timerInt);
       if (closeRpcName) await sb.rpc(closeRpcName, { p_session_id: session.id });
