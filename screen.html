@@ -17,8 +17,9 @@
   body{overflow:hidden;}
   .sound-unlock{position:fixed;inset:0;background:rgba(5,4,16,.92);display:flex;align-items:center;justify-content:center;z-index:999;cursor:pointer;flex-direction:column;gap:16px;}
   .sound-unlock .btn-gold{padding:18px 34px;font-size:18px;}
-  .stage{height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;position:relative;}
-  .logo-badge{position:absolute;top:28px;left:50%;transform:translateX(-50%);text-align:center;}
+  .stage{height:100vh;display:grid;grid-template-rows:auto 1fr auto;padding:20px 40px;position:relative;}
+  .stage-top{display:flex;align-items:center;gap:24px;}
+  .logo-badge{flex:1;text-align:center;}
   .logo-badge .title{font-family:'Cinzel Decorative',serif;font-size:26px;color:var(--gold-bright);text-shadow:0 0 20px rgba(232,189,92,.5);}
   .logo-badge .sub{font-size:13px;letter-spacing:.3em;color:var(--ink-dim);}
 
@@ -67,6 +68,20 @@
   .leaderboard-row .rank{font-family:'Cinzel',serif;font-size:30px;color:var(--gold-bright);width:50px;}
   .leaderboard-row .name{flex:1;font-size:26px;font-weight:700;}
   .leaderboard-row .pts{font-size:28px;font-weight:900;color:var(--gold-bright);}
+
+  .round-header{
+    text-align:center;padding:10px 20px;margin-top:8px;border-radius:12px;
+    background:rgba(91,42,158,.18);border:1px solid var(--line);
+  }
+  .round-header .rname{font-family:'Cinzel',serif;color:var(--gold-bright);font-size:17px;letter-spacing:.05em;}
+  .round-header .rdesc{color:var(--ink-dim);font-size:13px;margin-top:2px;}
+
+  .stage-content{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;}
+
+  .lifeline-dock{
+    border-top:1px solid var(--line);padding-top:16px;margin-top:10px;
+    display:flex;flex-direction:column;align-items:center;gap:10px;min-height:0;
+  }
 </style>
 </head>
 <body>
@@ -77,12 +92,17 @@
 </div>
 
 <div class="stage" id="stage">
-  <img src="shared/logo.png" alt="logo" style="position:absolute;top:20px;left:36px;height:70px;">
-  <div class="logo-badge"><div class="title">KAUN BANEGA GYANI</div><div class="sub">VSD PRABHU POOJA &amp; GURU VANDAN QUIZ</div></div>
-  <div id="content" style="margin-top:70px;display:flex;flex-direction:column;align-items:center;">
+  <div class="stage-top">
+    <img src="shared/logo.png" alt="logo" style="height:60px;">
+    <div class="logo-badge"><div class="title">KAUN BANEGA GYANI</div><div class="sub">VSD PRABHU POOJA &amp; GURU VANDAN QUIZ</div></div>
+    <div style="width:60px;"></div>
+  </div>
+  <div id="roundHeader" style="display:none;"></div>
+  <div id="content" class="stage-content">
     <div class="chakra"></div>
     <div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Get ready — the quiz is about to begin</div>
   </div>
+  <div id="lifelineDock" class="lifeline-dock" style="display:none;"></div>
 </div>
 
 <script src="shared/supabase-client.js"></script>
@@ -187,7 +207,8 @@ async function loadTeams(eventId) {
 async function render() {
   const content = document.getElementById('content');
   clearOverlays();
-  if (session.lifeline_active) renderLifelinePanel();
+  renderRoundHeader();
+  if (session.lifeline_active) renderLifelinePanel(); else document.getElementById('lifelineDock').style.display = 'none';
 
   if (!session.current_question_id) {
     content.innerHTML = `<div class="chakra"></div><div style="margin-top:18px;color:var(--ink-dim);font-size:20px;">Get ready — the quiz is about to begin</div>`;
@@ -301,38 +322,48 @@ function introCardHtml(intro) {
   return `<div class="chakra"></div>`;
 }
 
+function renderRoundHeader() {
+  const el = document.getElementById('roundHeader');
+  if (!session.active_round_name) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.className = 'round-header fade-in';
+  el.innerHTML = `<div class="rname">ROUND ${session.active_round_no} — ${session.active_round_name}</div>
+    ${session.active_round_description ? `<div class="rdesc">${session.active_round_description}</div>` : ''}`;
+}
+
 function renderLifelinePanel() {
+  const dock = document.getElementById('lifelineDock');
+  dock.style.display = 'flex';
   const team = teams.find(t => t.id === session.lifeline_team_id);
-  const panel = document.createElement('div');
-  panel.className = 'lifeline-panel pop-in';
-  panel.style = 'position:absolute;bottom:40px;left:50%;transform:translateX(-50%);background:rgba(10,8,32,.95);border:1px solid var(--gold);border-radius:16px;padding:20px 28px;max-width:640px;width:90%;text-align:center;';
 
   const label = { FIFTY_FIFTY: '50-50', AUDIENCE: 'Audience Poll', EXPERT: 'Expert Advice', TEAM_ADVICE: 'Team Advice' }[session.lifeline_kind] || session.lifeline_kind;
-  let body = `<div style="font-family:'Cinzel',serif;color:var(--gold-bright);font-size:20px;margin-bottom:8px;">${team?team.team_name:''} — ${label}</div>`;
+  let body = `<div style="font-family:'Cinzel',serif;color:var(--gold-bright);font-size:18px;">${team?team.team_name:''} — ${label}</div>`;
 
   if (session.lifeline_kind === 'FIFTY_FIFTY') {
-    body += `<div style="color:var(--ink-dim);">Two wrong options removed above.</div>`;
+    body += `<div style="color:var(--ink-dim);font-size:14px;">Two wrong options removed above.</div>`;
   } else if (session.lifeline_kind === 'AUDIENCE') {
-    if (session.lifeline_poll_results) {
-      body += (session.lifeline_poll_results || []).map(r => `
-        <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
-          <div style="width:26px;font-weight:800;">${r.option}</div>
-          <div style="flex:1;height:16px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;">
-            <div style="height:100%;width:${r.pct}%;background:linear-gradient(90deg,var(--purple),var(--gold));"></div>
-          </div>
-          <div style="width:50px;text-align:right;">${r.pct}%</div>
-        </div>`).join('');
-    } else {
-      body += `<div style="color:var(--ink-dim);margin-bottom:6px;">Audience is voting…</div><div class="timer-ring" id="lifelineTimer" style="margin:0 auto;width:70px;height:70px;font-size:22px;"></div>`;
-    }
+    body += `<div class="row" style="align-items:center;gap:20px;">
+      <div id="lifelinePollBars" style="min-width:320px;"></div>
+      ${!session.lifeline_poll_results ? `<div class="timer-ring urgent" id="lifelineTimer" style="width:60px;height:60px;font-size:20px;flex-shrink:0;"></div>` : ''}
+    </div>`;
   } else {
     body += session.lifeline_timer_end
-      ? `<div style="color:var(--ink-dim);margin-bottom:6px;">Consulting…</div><div class="timer-ring" id="lifelineTimer" style="margin:0 auto;width:70px;height:70px;font-size:22px;"></div>`
-      : `<div style="color:var(--ink-dim);">Time's up — resuming shortly.</div>`;
+      ? `<div style="color:var(--ink-dim);font-size:14px;">Consulting…</div><div class="timer-ring" id="lifelineTimer" style="width:60px;height:60px;font-size:20px;"></div>`
+      : `<div style="color:var(--ink-dim);font-size:14px;">Time's up — resuming shortly.</div>`;
   }
 
-  panel.innerHTML = body;
-  document.getElementById('stage').appendChild(panel);
+  dock.innerHTML = body;
+
+  if (session.lifeline_kind === 'AUDIENCE') {
+    renderLifelinePollBars(session.lifeline_poll_results);
+    if (!session.lifeline_poll_results) {
+      clearInterval(window._lifelinePollInt);
+      window._lifelinePollInt = setInterval(async () => {
+        const { data } = await sb.rpc('get_audience_results', { p_question_id: session.current_question_id });
+        renderLifelinePollBars(data);
+      }, 1000);
+    }
+  }
 
   if (session.lifeline_timer_end) {
     clearInterval(window._lifelineTimerInt);
@@ -342,15 +373,30 @@ function renderLifelinePanel() {
       if (el) el.textContent = secs;
       if (secs <= 0) {
         clearInterval(window._lifelineTimerInt);
+        clearInterval(window._lifelinePollInt);
         await sb.rpc('try_close_lifeline_subtimer', { p_session_id: session.id });
       }
     }, 300);
   }
 }
 
+function renderLifelinePollBars(rows) {
+  const el = document.getElementById('lifelinePollBars');
+  if (!el) return;
+  el.innerHTML = (rows || []).map(r => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+      <div style="width:22px;font-weight:800;font-size:14px;">${r.option}</div>
+      <div style="flex:1;height:14px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden;">
+        <div style="height:100%;width:${r.pct}%;background:linear-gradient(90deg,var(--purple),var(--gold));transition:width .5s ease;"></div>
+      </div>
+      <div style="width:44px;text-align:right;font-size:13px;">${r.pct}%</div>
+    </div>`).join('') || '<div style="color:var(--ink-dim);font-size:13px;">No votes yet…</div>';
+}
+
 function clearOverlays() {
-  document.querySelectorAll('.buzzer-order, .scoreboard, .timer-big, .lifeline-panel, .stage > .pop-in.result-overlay').forEach(el => el.remove());
+  document.querySelectorAll('.buzzer-order, .scoreboard, .timer-big, .stage > .pop-in.result-overlay').forEach(el => el.remove());
   clearInterval(window._lifelineTimerInt);
+  clearInterval(window._lifelinePollInt);
 }
 
 function questionHtml(selectedOption, correctOption) {

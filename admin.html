@@ -71,51 +71,62 @@
     <div class="grid2">
       <div>
         <div class="card panel">
-          <div class="row" style="justify-content:space-between;">
-            <div>
-              <label>Round</label>
-              <select id="roundSelect" onchange="loadQuestionsForRound()"></select>
-            </div>
-            <div>
-              <label>Question</label>
-              <select id="questionSelect"></select>
-            </div>
-            <div style="text-align:right;">
-              <label>Live State</label>
-              <div class="state-badge" id="stateBadge">—</div>
-            </div>
+          <div class="row" style="justify-content:space-between;align-items:center;">
+            <h3 style="margin:0;">Round</h3>
+            <div class="state-badge" id="stateBadge">—</div>
           </div>
-          <div id="qPreview" class="qtext-adm">Select a question and press SHOW QUESTION.</div>
-          <div class="qopts" id="qPreviewOpts"></div>
-
-          <div class="row" style="margin-top:14px;">
-            <button class="btn btn-gold" onclick="pushQuestion()">SHOW QUESTION</button>
-            <button class="btn" id="btnOpenBuzzer" onclick="openBuzzer()">OPEN BUZZER</button>
-            <button class="btn" id="btnStartTimer" style="display:none;" onclick="startSimpleTimer()">START TIMER (manual restart)</button>
-            <button class="btn btn-gold" id="btnPauseResume" style="display:none;" onclick="pauseOrResumeTimer()">PAUSE TIMER</button>
-            <button class="btn btn-outline" onclick="showRoundIntro()">SHOW ROUND RULES</button>
-            <button class="btn btn-outline" onclick="showLifelinesIntro()">SHOW LIFELINES</button>
-            <button class="btn btn-outline" onclick="dismissIntro()">DISMISS INTRO CARD</button>
-            <button class="btn" onclick="openPoll()">START AUDIENCE POLL</button>
-            <button class="btn" onclick="revealResult()">REVEAL ANSWER</button>
-            <button class="btn" onclick="completeQuestion()">COMPLETE / NEXT</button>
-            <button class="btn btn-danger" onclick="resetQuestion()">RESET QUESTION</button>
-            <button class="btn btn-danger" onclick="endRound()">END ROUND</button>
+          <div class="row" style="margin-top:10px;">
+            <select id="roundSelect" onchange="onRoundSelectChange()" style="flex:1;"></select>
+            <button class="btn btn-gold" id="btnStartRound" onclick="startRound()">START ROUND</button>
+            <button class="btn btn-danger" id="btnEndRound" onclick="endRound()" disabled>END ROUND</button>
           </div>
         </div>
 
-        <div class="card panel" id="simpleAnswerCard" style="display:none;">
-          <h3 style="margin-bottom:10px;">Record Verbal Answer (simple round)</h3>
-          <div class="row">
-            <select id="simpleTeam"></select>
-            <select id="simpleOption"><option>A</option><option>B</option><option>C</option><option>D</option></select>
-            <button class="btn btn-gold" onclick="recordSimpleAnswer()">SELECT — SHOW ORANGE</button>
+        <div class="card panel">
+          <h3 style="margin-bottom:10px;">Question</h3>
+          <select id="questionSelect" style="margin-bottom:10px;"></select>
+          <div id="qPreview" class="qtext-adm">Select a question and press SHOW QUESTION.</div>
+          <div class="qopts" id="qPreviewOpts"></div>
+          <button class="btn btn-gold" onclick="pushQuestion()">SHOW QUESTION</button>
+        </div>
+
+        <div class="card panel" id="liveControlsCard">
+          <h3 style="margin-bottom:10px;">Live Controls</h3>
+          <div class="row" id="liveControlsButtons">
+            <button class="btn" id="btnOpenBuzzer" style="display:none;" onclick="openBuzzer()">OPEN BUZZER</button>
+            <button class="btn" id="btnStartTimer" style="display:none;" onclick="startSimpleTimer()">RESTART TIMER</button>
+            <button class="btn btn-gold" id="btnPauseResume" style="display:none;" onclick="pauseOrResumeTimer()">PAUSE TIMER</button>
+            <button class="btn" id="btnOpenPoll" style="display:none;" onclick="openPoll()">START FULL AUDIENCE POLL</button>
+            <button class="btn" id="btnReveal" onclick="revealResult()">REVEAL ANSWER</button>
+            <button class="btn" id="btnComplete" onclick="completeQuestion()">COMPLETE / NEXT</button>
+            <button class="btn btn-danger" id="btnReset" onclick="resetQuestion()">RESET QUESTION</button>
           </div>
-          <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">Then click REVEAL ANSWER above to grade it and turn it green/red on screen.</div>
+
+          <div id="buzzInClosedCard" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+            <div style="margin-bottom:8px;">First buzz: <b id="firstBuzzTeamName"></b></div>
+            <button class="btn btn-gold" onclick="startAnswerTimer()">START ANSWER TIMER</button>
+          </div>
+
+          <div id="answeringCard" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+            <div style="margin-bottom:8px;">Currently answering: <b id="answeringTeamName"></b></div>
+            <div class="row">
+              <button class="btn btn-gold" onclick="markAnswer(true)">CORRECT</button>
+              <button class="btn btn-danger" onclick="markAnswer(false)">WRONG (no passing)</button>
+            </div>
+          </div>
+
+          <div id="simpleAnswerCard" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">
+            <div style="margin-bottom:8px;">Record who answered verbally:</div>
+            <div class="row">
+              <select id="simpleTeam"></select>
+              <select id="simpleOption"><option>A</option><option>B</option><option>C</option><option>D</option></select>
+              <button class="btn btn-gold" onclick="recordSimpleAnswer()">SELECT</button>
+            </div>
+          </div>
         </div>
 
         <div class="card panel" id="lifelineCard" style="display:none;">
-          <h3 style="margin-bottom:10px;">Activate Lifeline (simple rounds only, one per team per question)</h3>
+          <h3 style="margin-bottom:10px;">Lifelines</h3>
           <div class="row">
             <select id="lifelineTeam"></select>
             <button class="btn btn-gold" onclick="requestLifeline('FIFTY_FIFTY')">50-50</button>
@@ -123,20 +134,7 @@
             <button class="btn btn-gold" onclick="requestLifeline('EXPERT')">EXPERT ADVICE</button>
             <button class="btn btn-gold" onclick="requestLifeline('TEAM_ADVICE')">TEAM ADVICE</button>
           </div>
-          <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">Pauses the timer automatically. Click RESUME TIMER above when the team is ready to continue.</div>
-        </div>
-
-        <div class="card panel" id="buzzInClosedCard" style="display:none;">
-          <h3 style="margin-bottom:10px;">First buzz: <span id="firstBuzzTeamName"></span></h3>
-          <button class="btn btn-gold" onclick="startAnswerTimer()">START ANSWER TIMER</button>
-        </div>
-
-        <div class="card panel" id="answeringCard" style="display:none;">
-          <h3 style="margin-bottom:10px;">Currently Answering: <span id="answeringTeamName"></span></h3>
-          <div class="row">
-            <button class="btn btn-gold" onclick="markAnswer(true)">CORRECT</button>
-            <button class="btn btn-danger" onclick="markAnswer(false)">WRONG (no passing)</button>
-          </div>
+          <div style="font-size:12px;color:var(--ink-dim);margin-top:6px;">One per team per question. Pauses the timer — click PAUSE TIMER's button above (now RESUME TIMER) when the team is ready to continue.</div>
         </div>
 
         <div class="card panel" id="buzzerOrderCard">
@@ -144,7 +142,7 @@
           <div id="buzzerOrderList" style="color:var(--ink-dim);font-size:14px;">No buzzes yet.</div>
         </div>
 
-        <div class="card panel" id="rapidFireCard">
+        <div class="card panel" id="rapidFireCard" style="display:none;">
           <h3 style="margin-bottom:10px;">Rapid Fire (mark per team, per question)</h3>
           <div class="row" style="margin-bottom:10px;">
             <select id="rfTeam"></select>
@@ -402,12 +400,21 @@ async function loadRounds() {
   const qbSel = document.getElementById('qbRound'); qbSel.innerHTML = rounds.map(r => `<option value="${r.id}">R${r.round_no} — ${r.round_name}</option>`).join('');
   const editSel = document.getElementById('editRoundPicker');
   editSel.innerHTML = `<option value="">— Edit existing round —</option>` + rounds.map(r => `<option value="${r.id}">R${r.round_no} — ${r.round_name}</option>`).join('');
-  sel.onchange = () => { loadQuestionsForRound(); updateRoundModeButtons(); };
-  if (rounds.length) { await loadQuestionsForRound(); updateRoundModeButtons(); }
+  // Pre-select whichever round is currently active, if any
+  if (session.current_round_id && rounds.some(r => r.id === session.current_round_id)) {
+    sel.value = session.current_round_id;
+  }
+  if (rounds.length) await onRoundSelectChange();
 }
 
 function currentRound() {
   return rounds.find(r => r.id === document.getElementById('roundSelect').value);
+}
+
+async function onRoundSelectChange() {
+  await loadQuestionsForRound();
+  updateRoundModeButtons();
+  updateRoundStartEndButtons();
 }
 
 // Show/hide buzzer vs. simple-timer vs. rapid-fire controls based on the
@@ -416,8 +423,10 @@ function updateRoundModeButtons() {
   const r = currentRound();
   const hasBuzzer = r ? r.has_buzzer : true;
   const hasRapidFire = r ? r.has_rapid_fire : false;
+  const isAudienceRound = r ? r.round_type === 'AUDIENCE' : false;
   document.getElementById('btnOpenBuzzer').style.display = hasBuzzer ? '' : 'none';
   document.getElementById('btnStartTimer').style.display = hasBuzzer ? 'none' : '';
+  document.getElementById('btnOpenPoll').style.display = isAudienceRound ? '' : 'none';
   document.getElementById('buzzerOrderCard').style.display = hasBuzzer ? '' : 'none';
   document.getElementById('rapidFireCard').style.display = hasRapidFire ? '' : 'none';
   document.getElementById('simpleAnswerCard').style.display = (!hasBuzzer && !hasRapidFire) ? '' : 'none';
@@ -620,17 +629,32 @@ function renderControlPanel() {
   const hasRunningOrPausedTimer = session.timer_paused || (session.timer_end && ['BUZZER_OPEN','AUDIENCE_POLL_OPEN','QUESTION_DISPLAY'].includes(session.state));
   pauseBtn.style.display = hasRunningOrPausedTimer ? '' : 'none';
   pauseBtn.textContent = session.timer_paused ? 'RESUME TIMER' : 'PAUSE TIMER';
+  updateRoundStartEndButtons();
   renderBuzzerOrder();
   renderScoreboard();
+}
+function updateRoundStartEndButtons() {
+  const active = !!session.active_round_name;
+  const r = currentRound();
+  const selectedIsActive = active && r && r.id === session.current_round_id;
+  document.getElementById('btnStartRound').disabled = active;
+  document.getElementById('btnEndRound').disabled = !selectedIsActive;
 }
 async function updateFirstBuzzName() {
   const { data } = await sb.from('quiz_buzzers').select('*, quiz_teams(team_name)').eq('question_id', session.current_question_id).order('sequence_no').limit(1);
   document.getElementById('firstBuzzTeamName').textContent = data && data[0] ? data[0].quiz_teams.team_name : '—';
 }
+async function startRound() {
+  const roundId = document.getElementById('roundSelect').value;
+  if (!roundId) return toast('Select a round first');
+  const { error } = await sb.rpc('start_round', { p_session_id: session.id, p_round_id: roundId });
+  if (error) toast(error.message);
+}
 
 async function pushQuestion() {
   const qid = document.getElementById('questionSelect').value;
   if (!qid) return toast('Select a question first');
+  if (!session.active_round_name) return toast('Start the round first');
   const { error } = await sb.rpc('push_question', { p_session_id: session.id, p_question_id: qid });
   if (error) toast(error.message);
 }
@@ -668,26 +692,10 @@ async function recordSimpleAnswer() {
   if (error) toast(error.message);
 }
 async function endRound() {
-  const roundId = document.getElementById('roundSelect').value;
-  if (!roundId) return toast('Select a round first');
   const r = currentRound();
-  if (!confirm(`End "${r?.round_name}" and move to the next round?`)) return;
-  const { error } = await sb.rpc('end_round_and_advance', { p_session_id: session.id, p_ending_round_id: roundId });
-  if (error) toast(error.message); else { toast('Round ended'); await loadRounds(); }
-}
-async function showRoundIntro() {
-  const roundId = document.getElementById('roundSelect').value;
-  if (!roundId) return toast('Select a round first');
-  const { error } = await sb.rpc('show_round_intro', { p_session_id: session.id, p_round_id: roundId });
-  if (error) toast(error.message);
-}
-async function showLifelinesIntro() {
-  const { error } = await sb.rpc('show_lifelines_intro', { p_session_id: session.id });
-  if (error) toast(error.message);
-}
-async function dismissIntro() {
-  const { error } = await sb.rpc('dismiss_intro', { p_session_id: session.id });
-  if (error) toast(error.message);
+  if (!confirm(`End "${r?.round_name}"? You'll pick and start the next round yourself.`)) return;
+  const { error } = await sb.rpc('end_round', { p_session_id: session.id, p_round_id: r.id });
+  if (error) toast(error.message); else toast('Round ended');
 }
 async function openPoll() { const { error } = await sb.rpc('open_audience_poll', { p_session_id: session.id, p_seconds: 30 }); if (error) toast(error.message); }
 async function revealResult() { const { error } = await sb.rpc('reveal_result', { p_session_id: session.id }); if (error) toast(error.message); }
