@@ -125,7 +125,11 @@ begin
 
   if p_lifeline_type = 'FIFTY_FIFTY' then
     select array(
-      select unnest(array['A','B','C','D']) except select v_question.correct_option
+      select opt from (
+        select unnest(array['A','B','C','D']) as opt
+        except
+        select v_question.correct_option
+      ) sub
       order by random() limit 2
     ) into v_eliminated;
   else
